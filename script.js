@@ -1916,7 +1916,18 @@ async function fetchAndDisplayLesson(prompt, buttonElement) {
     lessonContainer.scrollIntoView({ behavior: 'smooth', block: 'center' });
 
     try {
-        const fullPrompt = `Chỉ cung cấp nội dung bài học chi tiết cho yêu cầu sau. KHÔNG tạo ra quiz hay các liên kết tương tác nào khác. Sử dụng Markdown để định dạng và KaTeX cho công thức toán học. Yêu cầu: ${prompt}`;
+        // UPDATED: New, more detailed prompt for lesson content
+        const fullPrompt = `Bạn là một gia sư AI chuyên nghiệp. Hãy tạo một bài giảng chi tiết và có cấu trúc rõ ràng cho yêu cầu sau.
+        QUY TẮC TRÌNH BÀY (RẤT QUAN TRỌNG):
+        1.  **Tiêu đề chính:** Bắt đầu bằng một tiêu đề chính (ví dụ: \`# Giới thiệu về Thì Hiện tại Đơn\`).
+        2.  **Cấu trúc rõ ràng:** Sử dụng các tiêu đề phụ (\`##\`, \`###\`) để chia nhỏ các phần như "Định nghĩa", "Cách dùng", "Cấu trúc", "Ví dụ".
+        3.  **Làm nổi bật:** Khi liệt kê các mục, hãy **in đậm** thuật ngữ chính ở đầu mỗi mục (ví dụ: \`- **Chủ ngữ (Subject):** Là...\`).
+        4.  **Ví dụ:** Đặt tất cả các câu ví dụ trong khối trích dẫn (\`> Ví dụ: She reads a book.\`).
+        5.  **Ghi chú:** Các lưu ý quan trọng hoặc mẹo nên được đặt trong khối trích dẫn và bắt đầu bằng "Lưu ý:" (ví dụ: \`> **Lưu ý:** Đối với ngôi thứ ba số ít...\`).
+        6.  **Ngôn ngữ:** Giảng bài hoàn toàn bằng tiếng Việt.
+
+        YÊU CẦU CỦA HỌC VIÊN: "${prompt}"`;
+        
         const result = await model.generateContent(fullPrompt);
         const responseText = result.response.text();
         
