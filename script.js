@@ -56,6 +56,10 @@ const lessonTitle = document.getElementById('lesson-title');
 const lessonContent = document.getElementById('lesson-content');
 const closeLessonModal = document.getElementById('close-lesson-modal');
 
+const alertModal = document.getElementById('alert-modal');
+const alertModalText = document.getElementById('alert-modal-text');
+const closeAlertModal = document.getElementById('close-alert-modal');
+
 const modeSelect = document.getElementById('mode-select');
 const modePracticeBtn = document.getElementById('mode-practice-btn');
 const modeInteractiveBtn = document.getElementById('mode-interactive-btn');
@@ -140,6 +144,7 @@ let conversationHistory = [];
 const synth = window.speechSynthesis;
 let audioState = { utterance: null, isPaused: false };
 let completedTopics = []; // For learning mode
+let learningCache = {}; // NEW: Cache for learning mode lessons
 
 // --- System Prompt for Learning Mode ---
 const LEARNING_MODE_SYSTEM_PROMPT = `**CHỈ THỊ HỆ THỐNG - CHẾ ĐỘ HỌC TẬP ĐANG BẬT**
@@ -159,8 +164,22 @@ function extractAndParseJson(rawText) {
     const match = rawText.match(regex);
     let jsonString = (match && match[1]) ? match[1] : rawText;
     jsonString = jsonString.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '');
-    try { return JSON.parse(jsonString); } 
-    catch (error) { console.error("JSON Parse Error:", error, "String:", jsonString); return null; }
+    try { 
+        return JSON.parse(jsonString); 
+    } catch (error) { 
+        console.error("JSON Parse Error:", error, "String:", jsonString); 
+        return null; 
+    }
+}
+
+// NEW: Modal Alert Function
+function showModalAlert(message) {
+    alertModalText.textContent = message;
+    alertModal.classList.add('active');
+}
+
+function showError(message) {
+    showModalAlert(message);
 }
 
 // --- AI TOOLBOX ---
@@ -277,15 +296,11 @@ function resetQuizState() {
     summarySaveStatus.textContent = '';
     conversationHistory = [];
     conversationLog.innerHTML = '';
-}
-
-function showError(message) {
-    alert(message); // Using a temporary alert for the purpose of this demo
+    learningCache = {}; // Reset cache
 }
 
 // --- NEW: Functions for reinforcement and expansion ---
 async function requestReinforcement(questionArgs, userAnswer) {
-    // Placeholder function to simulate the request
     lessonModal.classList.add('active');
     lessonTitle.textContent = "Củng cố kiến thức";
     lessonContent.innerHTML = '<div class="spinner mx-auto"></div>';
@@ -296,24 +311,25 @@ async function requestReinforcement(questionArgs, userAnswer) {
         const response = await result.response;
         const lessonData = extractAndParseJson(response.text());
 
-        if (lessonData) {
-            lessonContent.innerHTML = `
-                <h4 class="font-bold text-lg mb-2 text-purple-600 dark:text-purple-400">${lessonData.conceptTitle}</h4>
-                <div class="prose dark:prose-invert">
-                    <p>${lessonData.mistakeAnalysis}</p>
-                    <p>${lessonData.conceptExplanation}</p>
-                    <h5 class="font-semibold mt-4 mb-2">Ví dụ:</h5>
-                    <ul class="list-disc list-inside">
-                        ${lessonData.examples.map(ex => `<li>${typeof ex === 'object' ? `${ex.en} - ${ex.vi}` : ex}</li>`).join('')}
-                    </ul>
-                    <h5 class="font-semibold mt-4 mb-2">Mẹo luyện tập:</h5>
-                    <p>${lessonData.practiceTip}</p>
-                </div>
-            `;
-            renderMath(lessonContent);
-        } else {
+        if (!lessonData) {
             lessonContent.innerHTML = `<p class="text-red-500">Lỗi: Không thể nhận phản hồi củng cố kiến thức từ AI.</p>`;
+            return;
         }
+
+        lessonContent.innerHTML = `
+            <h4 class="font-bold text-lg mb-2 text-purple-600 dark:text-purple-400">${lessonData.conceptTitle}</h4>
+            <div class="prose dark:prose-invert max-w-none">
+                <p>${marked.parse(lessonData.mistakeAnalysis || '')}</p>
+                <p>${marked.parse(lessonData.conceptExplanation || '')}</p>
+                <h5 class="font-semibold mt-4 mb-2">Ví dụ:</h5>
+                <ul class="list-disc list-inside">
+                    ${(lessonData.examples || []).map(ex => `<li>${typeof ex === 'object' ? `${ex.en} - ${ex.vi}` : ex}</li>`).join('')}
+                </ul>
+                <h5 class="font-semibold mt-4 mb-2">Mẹo luyện tập:</h5>
+                <p>${marked.parse(lessonData.practiceTip || '')}</p>
+            </div>
+        `;
+        renderMath(lessonContent);
     } catch (error) {
         console.error("Lỗi khi yêu cầu củng cố:", error);
         lessonContent.innerHTML = `<p class="text-red-500">Lỗi: Không thể kết nối với AI để củng cố kiến thức.</p>`;
@@ -321,7 +337,6 @@ async function requestReinforcement(questionArgs, userAnswer) {
 }
 
 async function requestExpandedKnowledge(questionArgs) {
-     // Placeholder function to simulate the request
     lessonModal.classList.add('active');
     lessonTitle.textContent = "Mở rộng kiến thức";
     lessonContent.innerHTML = '<div class="spinner mx-auto"></div>';
@@ -332,23 +347,24 @@ async function requestExpandedKnowledge(questionArgs) {
         const response = await result.response;
         const lessonData = extractAndParseJson(response.text());
         
-        if (lessonData) {
-             lessonContent.innerHTML = `
-                <h4 class="font-bold text-lg mb-2 text-teal-600 dark:text-teal-400">${lessonData.conceptTitle}</h4>
-                <div class="prose dark:prose-invert">
-                     <p>${lessonData.conceptExplanation}</p>
-                    <h5 class="font-semibold mt-4 mb-2">Ví dụ:</h5>
-                    <ul class="list-disc list-inside">
-                        ${lessonData.examples.map(ex => `<li>${typeof ex === 'object' ? `${ex.en} - ${ex.vi}` : ex}</li>`).join('')}
-                    </ul>
-                    <h5 class="font-semibold mt-4 mb-2">Mẹo luyện tập:</h5>
-                    <p>${lessonData.practiceTip}</p>
-                </div>
-            `;
-            renderMath(lessonContent);
-        } else {
+        if (!lessonData) {
             lessonContent.innerHTML = `<p class="text-red-500">Lỗi: Không thể nhận phản hồi mở rộng kiến thức từ AI.</p>`;
+            return;
         }
+
+        lessonContent.innerHTML = `
+            <h4 class="font-bold text-lg mb-2 text-teal-600 dark:text-teal-400">${lessonData.conceptTitle}</h4>
+            <div class="prose dark:prose-invert max-w-none">
+                 <p>${marked.parse(lessonData.conceptExplanation || '')}</p>
+                <h5 class="font-semibold mt-4 mb-2">Ví dụ:</h5>
+                <ul class="list-disc list-inside">
+                    ${(lessonData.examples || []).map(ex => `<li>${typeof ex === 'object' ? `${ex.en} - ${ex.vi}` : ex}</li>`).join('')}
+                </ul>
+                <h5 class="font-semibold mt-4 mb-2">Mẹo luyện tập:</h5>
+                <p>${marked.parse(lessonData.practiceTip || '')}</p>
+            </div>
+        `;
+        renderMath(lessonContent);
     } catch (error) {
          console.error("Lỗi khi yêu cầu mở rộng:", error);
          lessonContent.innerHTML = `<p class="text-red-500">Lỗi: Không thể kết nối với AI để mở rộng kiến thức.</p>`;
@@ -396,7 +412,7 @@ async function startListeningPractice() {
     const length = document.getElementById('scriptLength').value;
 
     if (!topic) {
-        updateStatus('error', "Vui lòng nhập chủ đề cho bài nghe.");
+        showError("Vui lòng nhập chủ đề cho bài nghe.");
         setLoadingState(false);
         return;
     }
@@ -410,7 +426,8 @@ async function startListeningPractice() {
         const parsedData = extractAndParseJson(response.text());
 
         if (!parsedData || !parsedData.script || !parsedData.questions) {
-            throw new Error("AI không trả về dữ liệu bài nghe hợp lệ.");
+            showError("AI không trả về dữ liệu bài nghe hợp lệ. Vui lòng thử lại.");
+            throw new Error("Invalid listening data from AI.");
         }
         
         currentQuizData.raw = parsedData;
@@ -421,7 +438,7 @@ async function startListeningPractice() {
 
     } catch (error) {
         console.error("Error generating listening quiz:", error);
-        updateStatus('error', `Đã có lỗi xảy ra: ${error.message}`);
+        updateStatus('error', `Đã có lỗi xảy ra khi tạo bài nghe.`);
     } finally {
         setLoadingState(false);
     }
@@ -454,7 +471,7 @@ async function startWritingPractice() {
     const topic = document.getElementById('topicInput').value.trim();
     const level = levelSelect.value;
     if (!topic) {
-        updateStatus('error', "Vui lòng nhập chủ đề bài viết.");
+        showError("Vui lòng nhập chủ đề bài viết.");
         setLoadingState(false);
         return;
     }
@@ -485,7 +502,6 @@ async function startWritingPractice() {
 async function getWritingFeedback() {
     const userText = writingInput.value;
     if (userText.trim().split(/\s+/).length < 10) {
-        // Use a custom modal or message box instead of alert
         showError("Vui lòng viết ít nhất 10 từ để nhận được phản hồi chất lượng.");
         return;
     }
@@ -507,7 +523,8 @@ async function getWritingFeedback() {
         const feedbackData = extractAndParseJson(response.text());
 
         if (!feedbackData) {
-            throw new Error("AI không trả về phản hồi hợp lệ. Vui lòng thử lại.");
+            showError("AI không trả về phản hồi hợp lệ. Vui lòng thử lại.");
+            throw new Error("Invalid feedback data from AI.");
         }
 
         displayWritingFeedback(feedbackData);
@@ -560,7 +577,7 @@ async function startConversationPractice() {
     const topic = document.getElementById('topicInput').value.trim();
     const level = levelSelect.value;
     if (!topic) {
-        updateStatus('error', "Vui lòng nhập chủ đề hội thoại.");
+        showError("Vui lòng nhập chủ đề hội thoại.");
         setLoadingState(false);
         return;
     }
@@ -628,11 +645,15 @@ async function endConversationAndGetFeedback() {
         const response = await result.response;
         const feedbackData = extractAndParseJson(response.text());
 
-        if (!feedbackData) { throw new Error("AI không trả về nhận xét hợp lệ."); }
+        if (!feedbackData) { 
+            lessonContent.innerHTML = `<p class="text-red-500">Lỗi: AI không trả về nhận xét hợp lệ.</p>`;
+            throw new Error("Invalid conversation feedback from AI."); 
+        }
         
         displayConversationFeedback(feedbackData);
 
     } catch(error) {
+        console.error(error);
         lessonContent.innerHTML = `<p class="text-red-500">Lỗi khi nhận phản hồi: ${error.message}</p>`;
     } finally {
         endConversationBtn.disabled = false;
@@ -649,7 +670,6 @@ function addMessageToLog(sender, text) {
 
 function displayConversationFeedback(data) {
     lessonTitle.textContent = "Nhận xét buổi hội thoại";
-    lessonTitle.className = "text-2xl font-bold text-indigo-600 dark:text-indigo-400";
     
     lessonContent.innerHTML = `
         <div class="bg-gray-100 dark:bg-gray-800 p-3 rounded-lg border border-gray-200 dark:border-gray-700">
@@ -690,7 +710,11 @@ async function generateExercises() {
     const topicInput = document.getElementById('topicInput');
     const topic = topicInput ? topicInput.value.trim() : '';
 
-    if (!topic) { updateStatus('error', "Vui lòng nhập chủ đề."); setLoadingState(false); return; }
+    if (!topic) { 
+        showError("Vui lòng nhập chủ đề."); 
+        setLoadingState(false); 
+        return; 
+    }
 
     currentTestResult.subject = subjectText;
     currentTestResult.topic = topic;
@@ -748,7 +772,7 @@ async function generateExercises() {
         if (requestParts.length > 0) {
              prompt += `Hãy sử dụng các công cụ được cung cấp để tạo ra: ${requestParts.join(', ')}.`;
         } else {
-            updateStatus('error', 'Vui lòng chọn ít nhất một dạng bài tập.');
+            showError('Vui lòng chọn ít nhất một dạng bài tập.');
             setLoadingState(false);
             return;
         }
@@ -766,7 +790,8 @@ async function generateExercises() {
         const functionCalls = result.response.functionCalls();
         
         if (!functionCalls || functionCalls.length === 0) {
-            updateStatus('error', "AI không thể tạo bài tập. Vui lòng thử lại với chủ đề khác hoặc số lượng ít hơn.");
+            showError("AI không thể tạo bài tập. Vui lòng thử lại với chủ đề khác hoặc số lượng ít hơn.");
+            setLoadingState(false);
             return;
         }
         
@@ -808,8 +833,9 @@ async function generateExercises() {
         allQuestions = flattenedItems;
 
         if (allQuestions.length === 0) {
-             updateStatus('error', "Không có bài tập hợp lệ nào được tạo.");
-             return;
+            showError("Không có bài tập hợp lệ nào được tạo.");
+            setLoadingState(false);
+            return;
         }
 
         paperSubject.innerHTML = `<strong>Môn học:</strong> ${subjectText}`;
@@ -828,7 +854,7 @@ async function generateExercises() {
 
     } catch (error) {
         console.error("Error calling API:", error);
-        updateStatus('error', `Đã có lỗi xảy ra: ${error.message}`);
+        updateStatus('error', `Đã có lỗi xảy ra khi tạo bài tập.`);
     } finally {
         setLoadingState(false);
     }
@@ -884,7 +910,7 @@ function createQuestionItem(title, questionId) {
 
 function createFeedbackDiv(explanation) { 
     const div = document.createElement('div'); 
-    div.className = 'feedback-box hidden'; 
+    div.className = 'feedback-box hidden mt-4 p-4 rounded-lg'; 
     div.innerHTML = marked.parse(sanitizeString(explanation)); 
     return div; 
 }
@@ -895,7 +921,7 @@ function renderReadingPassage(args, index) {
     item.innerHTML = `
         <p class="font-bold text-lg mb-4 text-gray-800 dark:text-gray-200"><strong>Đoạn văn:</strong> Đọc và trả lời các câu hỏi bên dưới.</p>
         <div class="p-4 my-4 bg-gray-100 dark:bg-gray-800 border-t border-b border-gray-200 dark:border-gray-700 rounded-lg">
-            <div class="text-justify leading-relaxed prose">${marked.parse(sanitizeString(args.passage))}</div>
+            <div class="text-justify leading-relaxed prose max-w-none dark:prose-invert">${marked.parse(sanitizeString(args.passage))}</div>
         </div>
     `;
     return item;
@@ -904,33 +930,49 @@ function renderReadingPassage(args, index) {
 function renderMultipleChoice(args, index) {
     const questionText = args.question;
     const title = `<strong>Câu ${index}:</strong> ${questionText}`;
-    const item = createQuestionItem(title, index); item.dataset.type = 'mcq';
+    const item = createQuestionItem(title, index);
+    item.dataset.type = 'mcq';
     
-    const correctIndex = args.correctAnswerIndex ?? (Array.isArray(args.options) ? args.options.indexOf(args.answer) : null);
+    const correctIndex = args.correctAnswerIndex ?? (Array.isArray(args.options) ? args.options.indexOf(args.answer) : -1);
     item.dataset.correct = correctIndex;
     
-    const optionsContainer = document.createElement('div'); optionsContainer.className = 'space-y-2';
+    const optionsContainer = document.createElement('div');
+    optionsContainer.className = 'space-y-3';
+
     if (Array.isArray(args.options)) {
         args.options.forEach((option, optionIndex) => { 
-            optionsContainer.innerHTML += `
-                <label for="q${index}-opt${optionIndex}" class="option-label">
-                    <input id="q${index}-opt${optionIndex}" name="q-${index}" type="radio" value="${optionIndex}" class="custom-radio">
-                    <span class="text-gray-800 dark:text-gray-300">${String.fromCharCode(65 + optionIndex)}. ${sanitizeString(option)}</span>
-                </label>`; 
+            const optionCard = document.createElement('button');
+            optionCard.className = 'option-card';
+            optionCard.dataset.value = optionIndex;
+            optionCard.innerHTML = `
+                <span class="option-letter">${String.fromCharCode(65 + optionIndex)}</span>
+                <span class="option-text">${sanitizeString(option)}</span>
+            `;
+            optionsContainer.appendChild(optionCard);
         });
-    } else if (args.options && typeof args.options === 'object') { // Handle object options for learning mode quiz
-         Object.keys(args.options).forEach((key, optionIndex) => {
-            const option = args.options[key];
-            optionsContainer.innerHTML += `
-                <label for="q${index}-opt${optionIndex}" class="option-label">
-                    <input id="q${index}-opt${optionIndex}" name="q-${index}" type="radio" value="${key}" class="custom-radio">
-                    <span class="text-gray-800 dark:text-gray-300">${key}. ${sanitizeString(option)}</span>
-                </label>`; 
-        });
-        item.dataset.correct = args.answer; // In learning mode, answer is the key 'A', 'B' etc.
     }
+
+    // Event Delegation for option selection
+    optionsContainer.addEventListener('click', (e) => {
+        const selectedCard = e.target.closest('.option-card');
+        if (!selectedCard || selectedCard.disabled) return;
+
+        // Deselect other cards
+        optionsContainer.querySelectorAll('.option-card').forEach(card => {
+            card.classList.remove('selected');
+        });
+
+        // Select the clicked card
+        selectedCard.classList.add('selected');
+        item.dataset.selectedAnswer = selectedCard.dataset.value;
+
+        // For interactive mode, enable the check button
+        const checkButton = document.getElementById('interactive-check-btn');
+        if (checkButton) checkButton.disabled = false;
+    });
+
     item.appendChild(optionsContainer);
-    const explanation = args.explanation || `Đáp án đúng là lựa chọn ${args.answer}.`;
+    const explanation = args.explanation || `Đáp án đúng là lựa chọn ${String.fromCharCode(65 + correctIndex)}.`;
     item.appendChild(createFeedbackDiv(`<span class="font-bold">Giải thích:</span> ${explanation}`));
     return item;
 }
@@ -940,7 +982,6 @@ function renderFillInTheBlank(args, index) {
     const item = createQuestionItem('', index);
     item.dataset.type = 'fib';
     
-    // FIX: Handle both 'blanks' (array) and 'correctAnswer' (string)
     const correctAnswers = Array.isArray(args.blanks) ? args.blanks : [args.correctAnswer || ''];
     item.dataset.correct = JSON.stringify(correctAnswers.map(b => sanitizeString(b)));
     
@@ -960,8 +1001,12 @@ function renderTrueFalse(args, index) {
     const title = `<strong>Câu ${index}:</strong> ${sanitizeString(args.statement)}`;
     const item = createQuestionItem(title, index); item.dataset.type = 'tf'; item.dataset.correct = sanitizeString(String(args.isCorrect));
     item.innerHTML += `<div class="flex space-x-4 mt-4">
-        <label for="q${index}-true" class="option-label w-1/2"><input id="q${index}-true" name="q-${index}" type="radio" value="true" class="custom-radio"><span class="text-gray-800 dark:text-gray-300">Đúng</span></label>
-        <label for="q${index}-false" class="option-label w-1/2"><input id="q${index}-false" name="q-${index}" type="radio" value="false" class="custom-radio"><span class="text-gray-800 dark:text-gray-300">Sai</span></label>
+        <label class="flex-1"><input name="q-${index}" type="radio" value="true" class="hidden peer">
+            <div class="p-4 rounded-lg border-2 border-gray-300 dark:border-gray-600 cursor-pointer peer-checked:border-indigo-500 peer-checked:bg-indigo-50 dark:peer-checked:bg-indigo-900/50 text-center">Đúng</div>
+        </label>
+        <label class="flex-1"><input name="q-${index}" type="radio" value="false" class="hidden peer">
+            <div class="p-4 rounded-lg border-2 border-gray-300 dark:border-gray-600 cursor-pointer peer-checked:border-indigo-500 peer-checked:bg-indigo-50 dark:peer-checked:bg-indigo-900/50 text-center">Sai</div>
+        </label>
     </div>`;
     item.appendChild(createFeedbackDiv(`<span class="font-bold">Giải thích:</span> ${args.explanation || `Đáp án đúng là ${args.isCorrect ? 'Đúng' : 'Sai'}.`}`));
     return item;
@@ -994,7 +1039,7 @@ function renderMatching(args, index) {
     grid.innerHTML = `
         <div class="space-y-4">
             <h4 class="font-semibold">Cột A</h4>
-            <div class="space-y-2" id="col-a-container">${colADiv.innerHTML}</div>
+            <div class="space-y-2" id="col-a-container-${index}">${colADiv.innerHTML}</div>
         </div>
         <div class="space-y-4">
             <h4 class="font-semibold">Cột B (Kéo thả để nối)</h4>
@@ -1197,7 +1242,6 @@ function renderInteractiveMode(questionsToRender) {
     const passageHost = document.getElementById('interactive-passage-host');
     passageHost.innerHTML = '';
     let actualQuestions = questionsToRender;
-    let questionCounter = 0;
 
     if (questionsToRender.length > 0 && questionsToRender[0].name === 'reading_passage') {
         const passageElement = renderReadingPassage(questionsToRender[0].args);
@@ -1214,11 +1258,11 @@ function renderInteractiveMode(questionsToRender) {
          displayCurrentInteractiveQuestion();
     } else {
         if (passageHost.innerHTML !== '') { 
-             updateStatus('error', 'Bài đọc được tạo nhưng không có câu hỏi nào. Vui lòng thử lại.');
+             showError('Bài đọc được tạo nhưng không có câu hỏi nào. Vui lòng thử lại.');
              interactiveFooter.innerHTML = `<button id="change-settings-btn-error" class="btn btn-secondary">Đổi cài đặt</button>`;
              document.getElementById('change-settings-btn-error').addEventListener('click', () => switchView('controls'));
         } else {
-            updateStatus('error', 'Không có bài tập hợp lệ nào được tạo.');
+            showError('Không có bài tập hợp lệ nào được tạo.');
             switchView('controls');
         }
     }
@@ -1249,10 +1293,12 @@ function displayCurrentInteractiveQuestion() {
     checkButton.disabled = true;
     interactiveFooter.appendChild(checkButton);
     
-    const enableButton = () => checkButton.disabled = false;
-    interactiveQuestionHost.addEventListener('change', enableButton, { once: true });
-    interactiveQuestionHost.addEventListener('input', enableButton, { once: true });
-    interactiveQuestionHost.addEventListener('dragend', enableButton, { once: true });
+    // The event listener for enabling the button is now inside renderMultipleChoice for MCQs
+    // We keep these for other question types
+    interactiveQuestionHost.addEventListener('change', () => checkButton.disabled = false, { once: true });
+    interactiveQuestionHost.addEventListener('input', () => checkButton.disabled = false, { once: true });
+    interactiveQuestionHost.addEventListener('dragend', () => checkButton.disabled = false, { once: true });
+    
     checkButton.addEventListener('click', () => checkInteractiveAnswer(currentQuestionIndex));
 
     updateProgress();
@@ -1271,7 +1317,9 @@ function checkInteractiveAnswer(questionIndex) {
     });
 
     if (isGraded && isCorrect) { score++; confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } }); }
-    questionItem.querySelectorAll('input, textarea').forEach(el => el.disabled = true);
+    
+    // Disable all inputs in the question
+    questionItem.querySelectorAll('input, textarea, button').forEach(el => el.disabled = true);
     questionItem.querySelectorAll('.sortable-item').forEach(el => el.draggable = false);
     
     const continueButton = document.createElement('button');
@@ -1321,20 +1369,19 @@ function checkSingleAnswer(q, showFeedback = false, questionIndex = -1) {
 
     switch (q.dataset.type) {
         case 'mcq':
-            const selectedRadioMCQ = q.querySelector('input:checked');
-            userAnswer = selectedRadioMCQ ? selectedRadioMCQ.value : null;
+            userAnswer = q.dataset.selectedAnswer;
             const correctValueMCQ = q.dataset.correct;
+            const selectedButton = q.querySelector(`.option-card[data-value="${userAnswer}"]`);
 
-            if (selectedRadioMCQ) {
+            if (userAnswer !== undefined) {
                 isCorrect = userAnswer === correctValueMCQ;
                 if (showFeedback) {
-                    const allLabels = q.querySelectorAll('.option-label');
-                    allLabels.forEach((label) => {
-                        const radio = label.querySelector('input');
-                        if (radio.value == correctValueMCQ) {
-                            label.classList.add('correct');
-                        } else if (radio.checked) {
-                            label.classList.add('incorrect');
+                    const allButtons = q.querySelectorAll('.option-card');
+                    allButtons.forEach(button => {
+                        if (button.dataset.value === correctValueMCQ) {
+                            button.classList.add('correct');
+                        } else if (button.dataset.value === userAnswer) {
+                            button.classList.add('incorrect');
                         }
                     });
                 }
@@ -1348,12 +1395,12 @@ function checkSingleAnswer(q, showFeedback = false, questionIndex = -1) {
             if (selectedRadioTF) {
                 isCorrect = (selectedRadioTF.value === 'true') === isCorrectTF;
                 if (showFeedback) {
-                    const userChoiceLabel = selectedRadioTF.closest('.option-label');
-                    if (userChoiceLabel) userChoiceLabel.classList.add(isCorrect ? 'correct' : 'incorrect');
+                    const userChoiceDiv = selectedRadioTF.nextElementSibling;
+                    userChoiceDiv.classList.add(isCorrect ? 'correct' : 'incorrect');
                     
-                    const correctLabel = q.querySelector(`input[value="${isCorrectTF}"]`).closest('.option-label');
-                    if (correctLabel && !correctLabel.classList.contains('correct')) {
-                        correctLabel.classList.add('correct');
+                    const correctDiv = q.querySelector(`input[value="${isCorrectTF}"]`).nextElementSibling;
+                    if (!correctDiv.classList.contains('correct')) {
+                        correctDiv.classList.add('correct');
                     }
                 }
             }
@@ -1380,7 +1427,6 @@ function checkSingleAnswer(q, showFeedback = false, questionIndex = -1) {
             isCorrect = allCorrect;
             break;
 
-
         case 'matching':
             const listContainer = q.querySelector('.sortable-list');
             const userOrderItems = listContainer.querySelectorAll('.sortable-item');
@@ -1394,7 +1440,7 @@ function checkSingleAnswer(q, showFeedback = false, questionIndex = -1) {
                 if (isMatchCorrect) correctMatches++;
 
                 if (showFeedback) {
-                    const itemAContainer = q.querySelector(`#col-a-container`).children[idx];
+                    const itemAContainer = q.querySelector(`[id^="col-a-container-"]`).children[idx];
                     const itemBEl = userOrderItems[idx];
 
                     if (isMatchCorrect) {
@@ -1436,23 +1482,27 @@ function checkSingleAnswer(q, showFeedback = false, questionIndex = -1) {
         feedbackDiv.classList.add(isGraded ? (isCorrect ? 'correct' : 'incorrect') : 'info');
         
         if (isGraded && questionIndex !== -1) {
-            const button = document.createElement('button');
+            const buttonContainer = document.createElement('div');
             const questionData = allQuestions[questionIndex];
             const args = questionData.args || questionData;
 
             if (isCorrect) {
-                button.innerHTML = `<i data-lucide="sparkles" class="w-4 h-4 mr-2 inline-block"></i>Mở rộng kiến thức`;
-                button.className = 'btn bg-teal-600 hover:bg-teal-700 text-white text-sm mt-4';
-                button.onclick = () => requestExpandedKnowledge(args);
+                const expandBtn = document.createElement('button');
+                expandBtn.innerHTML = `<i data-lucide="sparkles" class="w-4 h-4 mr-2 inline-block"></i>Mở rộng kiến thức`;
+                expandBtn.className = 'btn bg-teal-600 hover:bg-teal-700 text-white text-sm mt-4';
+                expandBtn.onclick = () => requestExpandedKnowledge(args);
+                buttonContainer.appendChild(expandBtn);
             } else {
-                button.innerHTML = `<i data-lucide="shield-question" class="w-4 h-4 mr-2 inline-block"></i>Củng cố kiến thức`;
-                button.className = 'btn bg-purple-600 hover:bg-purple-700 text-white text-sm mt-4';
-                button.onclick = () => {
+                const reinforceBtn = document.createElement('button');
+                reinforceBtn.innerHTML = `<i data-lucide="shield-question" class="w-4 h-4 mr-2 inline-block"></i>Củng cố kiến thức`;
+                reinforceBtn.className = 'btn bg-purple-600 hover:bg-purple-700 text-white text-sm mt-4';
+                reinforceBtn.onclick = () => {
                     const finalUserAnswer = userAnswer || "(không chọn đáp án)";
                     requestReinforcement(args, finalUserAnswer);
                 };
+                buttonContainer.appendChild(reinforceBtn);
             }
-            feedbackDiv.appendChild(button);
+            feedbackDiv.appendChild(buttonContainer);
             lucide.createIcons();
         }
     }
@@ -1465,7 +1515,6 @@ function checkAllPracticeAnswers() {
     let gradableQuestions = 0;
     sessionResults = [];
 
-    let questionCounter = 0;
     exerciseListContainer.querySelectorAll('.question-item').forEach(q_element => {
         let mainIndex = parseInt(q_element.dataset.mainIndex, 10);
         
@@ -1746,7 +1795,7 @@ async function startLearningSession() {
 
     const topic = document.getElementById('topicInput').value.trim();
     if (!topic) {
-        updateStatus('error', "Vui lòng nhập chủ đề bạn muốn học.");
+        showError("Vui lòng nhập chủ đề bạn muốn học.");
         setLoadingState(false);
         return;
     }
@@ -1757,15 +1806,9 @@ async function startLearningSession() {
     learningContent.innerHTML = '<div class="spinner mx-auto mt-10"></div>';
 
     try {
-        // Modified prompt to be simpler, asking only for the path
         const prompt = `Bạn là một người hướng dẫn học tập chuyên nghiệp, có khả năng chia nhỏ các chủ đề phức tạp thành một lộ trình học tập rõ ràng.
         Khi người dùng yêu cầu một chủ đề, hãy trả lời bằng một danh sách các bài học có cấu trúc (dùng Markdown với gạch đầu dòng).
         Đối với MỖI BÀI HỌC trong lộ trình, bạn PHẢI định dạng nó theo cú pháp đặc biệt sau: \`[Tên bài học]{"prompt":"Yêu cầu chi tiết để bạn giảng giải về bài học này"}\`. Prompt phải chi tiết và bằng tiếng Việt.
-        Ví dụ, với chủ đề "Các thì trong tiếng Anh", bạn có thể tạo một lộ trình gồm các bài học như sau:
-        - [Tổng quan về Thì (Tenses) trong tiếng Anh]{"prompt":"Xin hãy giới thiệu về khái niệm thì (tenses) trong tiếng Anh là gì, giải thích tầm quan trọng của việc sử dụng đúng thì trong giao tiếp và viết lách, và cung cấp một cái nhìn tổng quan về cách thì giúp thể hiện thời gian và hành động."}
-        - [Thì Hiện tại Đơn (Present Simple)]{"prompt":"Xin hãy giảng giải chi tiết về Thì Hiện tại Đơn (Present Simple). Bao gồm cấu trúc, cách dùng, dấu hiệu nhận biết và ví dụ."}
-        - [Thì Quá khứ Đơn (Past Simple)]{"prompt":"Xin hãy giảng giải chi tiết về Thì Quá khứ Đơn (Past Simple). Bao gồm cấu trúc, cách dùng, dấu hiệu nhận biết và ví dụ."}
-        ...
         Yêu cầu của người dùng: Tạo một lộ trình học chi tiết cho chủ đề "${topic}".`;
         const result = await model.generateContent(prompt);
         const response = result.response;
@@ -1814,46 +1857,38 @@ function renderLearningPath(text) {
 }
 
 async function fetchAndDisplayLesson(prompt, buttonElement) {
+    const lessonContainerId = `lesson-${prompt.replace(/[^a-zA-Z0-9]/g, '')}`;
+    let lessonContainer = document.getElementById(lessonContainerId);
+
+    // If lesson already exists, toggle it or scroll to it
+    if (lessonContainer) {
+        lessonContainer.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        return;
+    }
+    
+    // If content is cached, render it directly
+    if (learningCache[prompt]) {
+        renderLessonContent(learningCache[prompt], prompt, buttonElement);
+        return;
+    }
+
     buttonElement.disabled = true;
     const iconSpan = buttonElement.querySelector('.icon');
     if (iconSpan) iconSpan.innerHTML = '<div class="spinner w-5 h-5"></div>';
     
-    const lessonContainer = document.createElement('div');
+    lessonContainer = document.createElement('div');
+    lessonContainer.id = lessonContainerId;
     lessonContainer.className = 'learning-item fade-in';
     learningContent.appendChild(lessonContainer);
     lessonContainer.scrollIntoView({ behavior: 'smooth', block: 'center' });
 
     try {
-        // Modified prompt to be simpler, asking for detailed lesson content only
         const fullPrompt = `Chỉ cung cấp nội dung bài học chi tiết cho yêu cầu sau. KHÔNG tạo ra quiz hay các liên kết tương tác nào khác. Sử dụng Markdown để định dạng và KaTeX cho công thức toán học. Yêu cầu: ${prompt}`;
         const result = await model.generateContent(fullPrompt);
         const responseText = result.response.text();
         
-        const formattedContent = marked.parse(responseText);
-
-        // Create a div for the lesson title
-        const lessonTitleEl = document.createElement('h3');
-        lessonTitleEl.className = 'text-xl font-bold mb-4 text-gray-800 dark:text-gray-200';
-        lessonTitleEl.textContent = buttonElement.textContent.trim();
-        lessonContainer.appendChild(lessonTitleEl);
-
-        // Create a div for the lesson content
-        const lessonContentEl = document.createElement('div');
-        lessonContentEl.className = 'prose max-w-none text-gray-700 dark:text-gray-300';
-        lessonContentEl.innerHTML = DOMPurify.sanitize(formattedContent);
-        lessonContainer.appendChild(lessonContentEl);
-        
-        // Render any math formulas
-        renderMath(lessonContainer);
-        lucide.createIcons();
-
-        const sanitizedPrompt = prompt.replace(/"/g, '&quot;');
-        if (!completedTopics.includes(sanitizedPrompt)) {
-            completedTopics.push(sanitizedPrompt);
-        }
-        buttonElement.classList.add('completed');
-        if (iconSpan) iconSpan.innerHTML = '<i data-lucide="check-circle-2" class="w-5 h-5"></i>';
-        lucide.createIcons();
+        learningCache[prompt] = responseText; // Cache the result
+        renderLessonContent(responseText, prompt, buttonElement);
 
     } catch (error) {
         console.error("Error fetching lesson:", error);
@@ -1867,92 +1902,41 @@ async function fetchAndDisplayLesson(prompt, buttonElement) {
     }
 }
 
-// This function is now unused in the new learning mode flow but kept for other modes.
-function insertRenderedQuizzes(container, quizzes) {
-    quizzes.forEach(quiz => {
-        const placeholder = container.querySelector(`#${quiz.id}`);
-        if (placeholder) {
-            try {
-                const quizData = JSON.parse(quiz.json);
-                let quizElement;
-                if (learningRenderers[quizData.type]) {
-                    quizElement = learningRenderers[quizData.type](quizData, quizzes.indexOf(quiz) + 1);
-                     // Add check button and logic for interactive learning quiz
-                    const checkBtn = document.createElement('button');
-                    checkBtn.className = 'check-learning-quiz-btn btn btn-primary mt-4';
-                    checkBtn.textContent = 'Kiểm tra';
-                    quizElement.appendChild(checkBtn);
-                    checkBtn.addEventListener('click', () => {
-                        const isCorrect = checkSingleLearningQuizAnswer(quizElement, quizData);
-                        checkBtn.disabled = true;
-                        quizElement.querySelectorAll('input, textarea, button').forEach(el => el.disabled = true);
-                    });
-                } else {
-                    throw new Error(`Unsupported quiz type: ${quizData.type}`);
-                }
-                
-                if (quizElement) {
-                    placeholder.replaceWith(quizElement);
-                }
-            } catch (e) {
-                console.error("Failed to parse quiz JSON:", e, quiz.json);
-                placeholder.innerHTML = `<p class="text-red-500">Lỗi hiển thị quiz.</p>`;
-            }
-        }
-    });
-}
-
-function checkSingleLearningQuizAnswer(quizElement, quizData) {
-    let isCorrect = false;
-    let explanationText = quizData.explanation;
-
-    switch(quizElement.dataset.type) {
-        case 'multiple_choice':
-            const selectedOption = quizElement.querySelector('.quiz-option-btn:not([disabled])');
-            const selectedValue = selectedOption ? selectedOption.dataset.option : null;
-            isCorrect = selectedValue === quizData.answer;
-            
-            quizElement.querySelectorAll('.quiz-option-btn').forEach(btn => {
-                btn.disabled = true;
-                if (btn.dataset.option === quizData.answer) {
-                    btn.classList.add('correct');
-                } else if (btn.dataset.option === selectedValue) {
-                    btn.classList.add('incorrect');
-                }
-            });
-            break;
-        case 'fill_in_the_blank':
-            const inputs = quizElement.querySelectorAll('.quiz-blank-input');
-            isCorrect = Array.from(inputs).every((input, index) => {
-                const correct = input.value.trim().toLowerCase() === quizData.blanks[index].toLowerCase();
-                input.classList.add(correct ? 'correct' : 'incorrect');
-                return correct;
-            });
-            if (!isCorrect) {
-                explanationText = `Đáp án đúng là: ${quizData.blanks.join(', ')}. ${explanationText}`;
-            }
-            break;
-        case 'short_answer':
-            const userAnswer = quizElement.querySelector('textarea').value.trim().toLowerCase();
-            const keywords = quizData.keywords.map(k => k.toLowerCase());
-            isCorrect = keywords.every(keyword => userAnswer.includes(keyword));
-            break;
-        case 'flashcard':
-        case 'drag_and_drop_matching':
-        case 'sentence_ordering':
-            isCorrect = false; // These are not graded automatically by this function
-            break;
+function renderLessonContent(responseText, prompt, buttonElement) {
+    const lessonContainerId = `lesson-${prompt.replace(/[^a-zA-Z0-9]/g, '')}`;
+    let lessonContainer = document.getElementById(lessonContainerId);
+    if (!lessonContainer) {
+        lessonContainer = document.createElement('div');
+        lessonContainer.id = lessonContainerId;
+        lessonContainer.className = 'learning-item fade-in';
+        learningContent.appendChild(lessonContainer);
     }
 
-    const explanationDiv = quizElement.querySelector('.quiz-explanation');
-    explanationDiv.innerHTML = `
-        <span class="font-bold">${isCorrect ? 'Chính xác!' : 'Chưa chính xác.'}</span>
-        <p class="mt-2">${DOMPurify.sanitize(marked.parse(explanationText))}</p>
-    `;
-    explanationDiv.classList.remove('hidden');
-    explanationDiv.classList.add(isCorrect ? 'correct' : 'incorrect');
+    const formattedContent = marked.parse(responseText);
     
-    return isCorrect;
+    const lessonTitleEl = document.createElement('h3');
+    lessonTitleEl.className = 'text-xl font-bold mb-4 text-gray-800 dark:text-gray-200';
+    lessonTitleEl.textContent = buttonElement.textContent.trim();
+    
+    const lessonContentEl = document.createElement('div');
+    lessonContentEl.className = 'prose max-w-none text-gray-700 dark:text-gray-300';
+    lessonContentEl.innerHTML = DOMPurify.sanitize(formattedContent, { ADD_TAGS: ["iframe"], ADD_ATTR: ['allow', 'allowfullscreen', 'frameborder', 'scrolling'] });
+
+    lessonContainer.innerHTML = ''; // Clear previous content or spinner
+    lessonContainer.appendChild(lessonTitleEl);
+    lessonContainer.appendChild(lessonContentEl);
+    
+    renderMath(lessonContainer);
+    lucide.createIcons();
+
+    const sanitizedPrompt = prompt.replace(/"/g, '&quot;');
+    if (!completedTopics.includes(sanitizedPrompt)) {
+        completedTopics.push(sanitizedPrompt);
+    }
+    buttonElement.classList.add('completed');
+    const iconSpan = buttonElement.querySelector('.icon');
+    if (iconSpan) iconSpan.innerHTML = '<i data-lucide="check-circle-2" class="w-5 h-5"></i>';
+    lucide.createIcons();
 }
 
 // --- EVENT LISTENERS ---
@@ -1998,7 +1982,6 @@ showTranscriptBtn.addEventListener('click', () => {
 
 const handleRestart = () => {
      if (generatedExercisesCache.length === 0) {
-         // Use a custom modal or message box instead of alert
          showError("Không có bài tập nào để làm lại. Vui lòng tạo bài tập trước.");
          return;
      }
@@ -2052,71 +2035,18 @@ lessonModal.addEventListener('click', (event) => {
         lessonModal.classList.remove('active');
     }
 });
+closeAlertModal.addEventListener('click', () => alertModal.classList.remove('active'));
+alertModal.addEventListener('click', (event) => {
+    if (event.target === alertModal) {
+        alertModal.classList.remove('active');
+    }
+});
 
 learningContent.addEventListener('click', (e) => {
     const link = e.target.closest('.learning-link');
     if (link) {
         e.preventDefault();
         fetchAndDisplayLesson(link.dataset.prompt, link);
-    }
-});
-
-// Listen for clicks on dynamically added quiz elements
-learningContent.addEventListener('click', (e) => {
-    const quizWrapper = e.target.closest('.quiz-wrapper');
-    if (!quizWrapper) return;
-    
-    if (e.target.closest('.quiz-option-btn')) {
-        const button = e.target.closest('.quiz-option-btn');
-        const quizData = JSON.parse(quizWrapper.dataset.quizData);
-        const isCorrect = button.dataset.option === quizData.answer;
-        
-        quizWrapper.querySelectorAll('.quiz-option-btn').forEach(btn => btn.disabled = true);
-        if (isCorrect) {
-            button.classList.add('correct');
-        } else {
-            button.classList.add('incorrect');
-            const correctBtn = quizWrapper.querySelector(`.quiz-option-btn[data-option="${quizData.answer}"]`);
-            if (correctBtn) correctBtn.classList.add('correct');
-        }
-
-        const explanationDiv = quizWrapper.querySelector('.quiz-explanation');
-        explanationDiv.innerHTML = DOMPurify.sanitize(marked.parse(`
-            <span class="font-bold">${isCorrect ? 'Chính xác!' : 'Chưa chính xác.'}</span>
-            <p class="mt-2">${quizData.explanation}</p>
-        `));
-        explanationDiv.classList.remove('hidden');
-        explanationDiv.classList.add(isCorrect ? 'correct' : 'incorrect');
-
-    } else if (e.target.closest('.check-learning-quiz-btn')) {
-         const checkBtn = e.target.closest('.check-learning-quiz-btn');
-         const quizData = JSON.parse(quizWrapper.dataset.quizData);
-         const isCorrect = checkSingleLearningQuizAnswer(quizWrapper, quizData);
-         
-         checkBtn.disabled = true;
-         quizWrapper.querySelectorAll('input, textarea, button').forEach(el => el.disabled = true);
-
-    } else if (e.target.closest('.flashcard-quiz')) {
-         const cardInner = quizWrapper.querySelector('.flashcard-inner');
-         cardInner.classList.toggle('flipped');
-    } else if (e.target.closest('.flashcard-nav-btn')) {
-         const navBtn = e.target.closest('.flashcard-nav-btn');
-         let cardIndex = parseInt(quizWrapper.dataset.cardIndex);
-         const totalCards = JSON.parse(quizWrapper.dataset.quizData).cards.length;
-
-         if (navBtn.classList.contains('next-btn')) {
-             cardIndex = (cardIndex + 1) % totalCards;
-         } else {
-             cardIndex = (cardIndex - 1 + totalCards) % totalCards;
-         }
-         
-         quizWrapper.dataset.cardIndex = cardIndex;
-         quizWrapper.querySelector('.flashcard-counter').textContent = `${cardIndex + 1}/${totalCards}`;
-         
-         quizWrapper.querySelector('.flashcard-inner').style.transform = 'rotateY(0deg)';
-         quizWrapper.querySelectorAll('.flashcard-face').forEach(face => face.classList.add('hidden', 'opacity-0'));
-         quizWrapper.querySelectorAll(`.flashcard-front`)[cardIndex].classList.remove('hidden', 'opacity-0');
-
     }
 });
 
