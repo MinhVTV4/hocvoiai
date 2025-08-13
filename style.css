@@ -137,6 +137,88 @@ body {
     transition: all 0.3s ease;
 }
 
+/* NEW: MCQ Option Card Styles */
+.option-card {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    padding: 0.75rem 1.25rem;
+    border: 2px solid hsl(var(--border));
+    border-radius: 0.75rem;
+    text-align: left;
+    transition: all 0.2s;
+    cursor: pointer;
+    background-color: hsl(var(--secondary));
+}
+.option-card:hover:not(:disabled) {
+    border-color: #a5b4fc; /* indigo-300 */
+    background-color: hsl(var(--accent));
+}
+.option-card.selected {
+    border-color: #4f46e5; /* indigo-600 */
+    background-color: #e0e7ff; /* indigo-100 */
+    color: #3730a3; /* indigo-800 */
+    font-weight: 600;
+}
+.dark .option-card.selected {
+    background-color: #3730a3; /* indigo-800 */
+    border-color: #a5b4fc; /* indigo-300 */
+    color: #e0e7ff; /* indigo-100 */
+}
+.option-card.correct {
+    border-color: #22c55e; /* green-500 */
+    background-color: #dcfce7; /* green-100 */
+    color: #15803d; /* green-800 */
+}
+.dark .option-card.correct {
+    background-color: #166534; /* green-800 */
+    border-color: #4ade80; /* green-400 */
+    color: #dcfce7; /* green-100 */
+}
+.option-card.incorrect {
+    border-color: #ef4444; /* red-500 */
+    background-color: #fee2e2; /* red-100 */
+    color: #b91c1c; /* red-800 */
+}
+.dark .option-card.incorrect {
+    background-color: #991b1b; /* red-800 */
+    border-color: #f87171; /* red-400 */
+    color: #fee2e2; /* red-100 */
+}
+.option-card:disabled {
+    cursor: not-allowed;
+    opacity: 0.7;
+}
+.option-card .option-letter {
+    font-weight: 700;
+    min-width: 2rem;
+    display: inline-block;
+    border: 2px solid hsl(var(--border));
+    border-radius: 50%;
+    width: 2rem;
+    height: 2rem;
+    text-align: center;
+    line-height: 1.75rem;
+    margin-right: 1rem;
+    flex-shrink: 0;
+}
+.option-card.selected .option-letter {
+    border-color: #4f46e5;
+    background-color: #4f46e5;
+    color: white;
+}
+.option-card.correct .option-letter {
+    border-color: #22c55e;
+    background-color: #22c55e;
+    color: white;
+}
+.option-card.incorrect .option-letter {
+    border-color: #ef4444;
+    background-color: #ef4444;
+    color: white;
+}
+
+
 /* Learning Mode Specific Styles */
 .learning-link {
     display: flex;
