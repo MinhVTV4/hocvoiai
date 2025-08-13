@@ -1306,6 +1306,7 @@ function displayCurrentInteractiveQuestion() {
     renderMath(interactiveQuestionHost);
 }
 
+// UPDATED: Interactive Mode Answer Checking Logic
 function checkInteractiveAnswer(questionIndex) {
     const questionItem = interactiveQuestionHost.querySelector('.question-item');
     const { isCorrect, isGraded, userAnswer } = checkSingleAnswer(questionItem, true, questionIndex);
@@ -1316,24 +1317,54 @@ function checkInteractiveAnswer(questionIndex) {
         isCorrect: isCorrect
     });
 
-    if (isGraded && isCorrect) { score++; confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } }); }
+    if (isGraded && isCorrect) { 
+        score++; 
+        confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } }); 
+    }
     
     // Disable all inputs in the question
     questionItem.querySelectorAll('input, textarea, button').forEach(el => el.disabled = true);
     questionItem.querySelectorAll('.sortable-item').forEach(el => el.draggable = false);
     
+    // --- NEW LOGIC FOR FOOTER ---
+    interactiveFooter.innerHTML = ''; // Clear the footer
+    const footerContainer = document.createElement('div');
+    footerContainer.className = 'flex justify-center items-center gap-4 flex-wrap';
+
+    // Add Reinforce/Expand buttons to the footer
+    const questionData = allQuestions[questionIndex];
+    const args = questionData.args || questionData;
+    if (isGraded) {
+        if (isCorrect) {
+            const expandBtn = document.createElement('button');
+            expandBtn.innerHTML = `<i data-lucide="sparkles" class="w-4 h-4 mr-2 inline-block"></i>Mở rộng kiến thức`;
+            expandBtn.className = 'btn bg-teal-600 hover:bg-teal-700 text-white text-sm';
+            expandBtn.onclick = () => requestExpandedKnowledge(args);
+            footerContainer.appendChild(expandBtn);
+        } else {
+            const reinforceBtn = document.createElement('button');
+            reinforceBtn.innerHTML = `<i data-lucide="shield-question" class="w-4 h-4 mr-2 inline-block"></i>Củng cố kiến thức`;
+            reinforceBtn.className = 'btn bg-purple-600 hover:bg-purple-700 text-white text-sm';
+            reinforceBtn.onclick = () => {
+                const finalUserAnswer = userAnswer || "(không chọn đáp án)";
+                requestReinforcement(args, finalUserAnswer);
+            };
+            footerContainer.appendChild(reinforceBtn);
+        }
+    }
+
+    // Add Continue button
     const continueButton = document.createElement('button');
     continueButton.id = 'interactive-continue-btn';
-    let btnClass = 'btn text-white ';
-    if (!isGraded) { btnClass += 'bg-blue-600 hover:bg-blue-700'; } 
-    else { btnClass += isCorrect ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'; }
-    continueButton.className = btnClass;
+    continueButton.className = 'btn btn-primary';
     continueButton.innerHTML = 'Tiếp tục <i data-lucide="arrow-right" class="inline-block w-4 h-4 ml-1"></i>';
-    interactiveFooter.innerHTML = ''; interactiveFooter.appendChild(continueButton);
     continueButton.addEventListener('click', showNextQuestion);
+    footerContainer.appendChild(continueButton);
+
+    interactiveFooter.appendChild(footerContainer);
     lucide.createIcons();
-    renderMath(interactiveQuestionHost);
 }
+
 
 function showNextQuestion() {
     currentQuestionIndex++;
@@ -1361,7 +1392,7 @@ function showSummary() {
 }
 
 // --- Grading Logic ---
-function checkSingleAnswer(q, showFeedback = false, questionIndex = -1) {
+function checkSingleAnswer(q, showFeedback = false) {
     let isCorrect = false; 
     let isGraded = true;
     let feedbackHTML = '';
@@ -1371,13 +1402,11 @@ function checkSingleAnswer(q, showFeedback = false, questionIndex = -1) {
         case 'mcq':
             userAnswer = q.dataset.selectedAnswer;
             const correctValueMCQ = q.dataset.correct;
-            const selectedButton = q.querySelector(`.option-card[data-value="${userAnswer}"]`);
-
+            
             if (userAnswer !== undefined) {
                 isCorrect = userAnswer === correctValueMCQ;
                 if (showFeedback) {
-                    const allButtons = q.querySelectorAll('.option-card');
-                    allButtons.forEach(button => {
+                    q.querySelectorAll('.option-card').forEach(button => {
                         if (button.dataset.value === correctValueMCQ) {
                             button.classList.add('correct');
                         } else if (button.dataset.value === userAnswer) {
@@ -1480,35 +1509,11 @@ function checkSingleAnswer(q, showFeedback = false, questionIndex = -1) {
         if (feedbackHTML) feedbackDiv.innerHTML = marked.parse(feedbackHTML);
         feedbackDiv.classList.remove('hidden');
         feedbackDiv.classList.add(isGraded ? (isCorrect ? 'correct' : 'incorrect') : 'info');
-        
-        if (isGraded && questionIndex !== -1) {
-            const buttonContainer = document.createElement('div');
-            const questionData = allQuestions[questionIndex];
-            const args = questionData.args || questionData;
-
-            if (isCorrect) {
-                const expandBtn = document.createElement('button');
-                expandBtn.innerHTML = `<i data-lucide="sparkles" class="w-4 h-4 mr-2 inline-block"></i>Mở rộng kiến thức`;
-                expandBtn.className = 'btn bg-teal-600 hover:bg-teal-700 text-white text-sm mt-4';
-                expandBtn.onclick = () => requestExpandedKnowledge(args);
-                buttonContainer.appendChild(expandBtn);
-            } else {
-                const reinforceBtn = document.createElement('button');
-                reinforceBtn.innerHTML = `<i data-lucide="shield-question" class="w-4 h-4 mr-2 inline-block"></i>Củng cố kiến thức`;
-                reinforceBtn.className = 'btn bg-purple-600 hover:bg-purple-700 text-white text-sm mt-4';
-                reinforceBtn.onclick = () => {
-                    const finalUserAnswer = userAnswer || "(không chọn đáp án)";
-                    requestReinforcement(args, finalUserAnswer);
-                };
-                buttonContainer.appendChild(reinforceBtn);
-            }
-            feedbackDiv.appendChild(buttonContainer);
-            lucide.createIcons();
-        }
     }
 
     return { isCorrect, isGraded, userAnswer };
 }
+
 
 function checkAllPracticeAnswers() {
     let totalScore = 0; 
@@ -1519,7 +1524,7 @@ function checkAllPracticeAnswers() {
         let mainIndex = parseInt(q_element.dataset.mainIndex, 10);
         
         if (q_element.dataset.type) { 
-            const result = checkSingleAnswer(q_element, true, mainIndex);
+            const result = checkSingleAnswer(q_element, true);
             
             const questionData = allQuestions[mainIndex];
             sessionResults.push({
@@ -1803,7 +1808,8 @@ async function startLearningSession() {
     learningPathTitle.textContent = `Lộ trình học: ${topic}`;
     learningPathSubject.textContent = subjectSelect.options[subjectSelect.selectedIndex].text;
     switchView('learning');
-    learningContent.innerHTML = '<div class="spinner mx-auto mt-10"></div>';
+    // UPDATED: Added descriptive loading message
+    learningContent.innerHTML = `<div class="text-center p-6 card"><div class="spinner h-8 w-8 mx-auto mb-4"></div><p class="font-semibold text-lg">AI đang tạo lộ trình học, vui lòng chờ...</p></div>`;
 
     try {
         const prompt = `Bạn là một người hướng dẫn học tập chuyên nghiệp, có khả năng chia nhỏ các chủ đề phức tạp thành một lộ trình học tập rõ ràng.
@@ -1860,13 +1866,11 @@ async function fetchAndDisplayLesson(prompt, buttonElement) {
     const lessonContainerId = `lesson-${prompt.replace(/[^a-zA-Z0-9]/g, '')}`;
     let lessonContainer = document.getElementById(lessonContainerId);
 
-    // If lesson already exists, toggle it or scroll to it
     if (lessonContainer) {
         lessonContainer.scrollIntoView({ behavior: 'smooth', block: 'center' });
         return;
     }
     
-    // If content is cached, render it directly
     if (learningCache[prompt]) {
         renderLessonContent(learningCache[prompt], prompt, buttonElement);
         return;
@@ -1879,6 +1883,8 @@ async function fetchAndDisplayLesson(prompt, buttonElement) {
     lessonContainer = document.createElement('div');
     lessonContainer.id = lessonContainerId;
     lessonContainer.className = 'learning-item fade-in';
+    // UPDATED: Added descriptive loading message
+    lessonContainer.innerHTML = `<div class="text-center p-4"><div class="spinner h-6 w-6 mx-auto mb-3"></div><p class="font-semibold">AI đang tạo nội dung bài học...</p></div>`;
     learningContent.appendChild(lessonContainer);
     lessonContainer.scrollIntoView({ behavior: 'smooth', block: 'center' });
 
