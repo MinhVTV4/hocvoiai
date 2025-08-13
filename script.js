@@ -1957,7 +1957,7 @@ async function fetchAndDisplayLesson(prompt, buttonElement) {
 
     if (lessonContainer) {
         lessonContainer.classList.remove('collapsed');
-        lessonContainer.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                lessonContainer.scrollIntoView({ behavior: 'smooth', block: 'start' });
         return;
     }
     
