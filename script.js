@@ -130,6 +130,9 @@ const summarySaveStatus = document.getElementById('summary-save-status');
 const restartQuizBtn = document.getElementById('restart-quiz-btn');
 const changeSettingsBtn = document.getElementById('change-settings-btn');
 
+// NEW: Scroll to Top Button
+const scrollToTopBtn = document.getElementById('scroll-to-top-btn');
+
 
 // --- State ---
 let allQuestions = [];
@@ -1907,10 +1910,16 @@ async function fetchAndDisplayLesson(prompt, buttonElement) {
     const iconSpan = buttonElement.querySelector('.icon');
     if (iconSpan) iconSpan.innerHTML = '<div class="spinner w-5 h-5"></div>';
     
+    // UPDATED: Collapse other lessons before creating a new one
+    learningContent.querySelectorAll('.learning-item:not(.collapsed)').forEach(item => {
+        if (item.id !== `lesson-path`) { // Don't collapse the main path
+            item.classList.add('collapsed');
+        }
+    });
+
     lessonContainer = document.createElement('div');
     lessonContainer.id = lessonContainerId;
     lessonContainer.className = 'learning-item fade-in';
-    // UPDATED: Added descriptive loading message
     lessonContainer.innerHTML = `<div class="text-center p-4"><div class="spinner h-6 w-6 mx-auto mb-3"></div><p class="font-semibold">AI đang tạo nội dung bài học...</p></div>`;
     learningContent.appendChild(lessonContainer);
     lessonContainer.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -1958,17 +1967,18 @@ function renderLessonContent(responseText, prompt, buttonElement) {
 
     const formattedContent = marked.parse(responseText);
     
+    // UPDATED: Title is now a toggle button
     const lessonTitleEl = document.createElement('h3');
-    lessonTitleEl.className = 'text-xl font-bold mb-4 text-gray-800 dark:text-gray-200';
+    lessonTitleEl.className = 'text-xl font-bold text-gray-800 dark:text-gray-200 lesson-title-toggle';
     lessonTitleEl.textContent = buttonElement.textContent.trim();
     
-    const lessonContentEl = document.createElement('div');
-    lessonContentEl.className = 'prose max-w-none text-gray-700 dark:text-gray-300';
-    lessonContentEl.innerHTML = DOMPurify.sanitize(formattedContent, { ADD_TAGS: ["iframe"], ADD_ATTR: ['allow', 'allowfullscreen', 'frameborder', 'scrolling'] });
+    const lessonBodyEl = document.createElement('div');
+    lessonBodyEl.className = 'lesson-body';
+    lessonBodyEl.innerHTML = `<div class="prose max-w-none text-gray-700 dark:text-gray-300">${DOMPurify.sanitize(formattedContent, { ADD_TAGS: ["iframe"], ADD_ATTR: ['allow', 'allowfullscreen', 'frameborder', 'scrolling'] })}</div>`;
 
     lessonContainer.innerHTML = ''; // Clear previous content or spinner
     lessonContainer.appendChild(lessonTitleEl);
-    lessonContainer.appendChild(lessonContentEl);
+    lessonContainer.appendChild(lessonBodyEl);
     
     renderMath(lessonContainer);
     lucide.createIcons();
@@ -2088,11 +2098,35 @@ alertModal.addEventListener('click', (event) => {
 
 learningContent.addEventListener('click', (e) => {
     const link = e.target.closest('.learning-link');
+    const titleToggle = e.target.closest('.lesson-title-toggle');
+
     if (link) {
         e.preventDefault();
         fetchAndDisplayLesson(link.dataset.prompt, link);
+    } else if (titleToggle) {
+        e.preventDefault();
+        const lessonItem = titleToggle.closest('.learning-item');
+        if (lessonItem) {
+            lessonItem.classList.toggle('collapsed');
+        }
     }
 });
+
+// --- SCROLL TO TOP LOGIC ---
+window.addEventListener('scroll', () => {
+    if (window.scrollY > 400) {
+        scrollToTopBtn.classList.add('visible');
+    } else {
+        scrollToTopBtn.classList.remove('visible');
+    }
+});
+scrollToTopBtn.addEventListener('click', () => {
+    window.scrollTo({
+        top: 0,
+        behavior: 'smooth'
+    });
+});
+
 
 // --- DARK MODE TOGGLE ---
 const themeToggleBtn = document.getElementById('theme-toggle-btn');
