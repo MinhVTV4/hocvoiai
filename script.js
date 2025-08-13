@@ -1986,14 +1986,16 @@ async function fetchAndDisplayLesson(prompt, buttonElement) {
 
     try {
         // UPDATED: New, more detailed prompt for lesson content
-        const fullPrompt = `Bạn là một gia sư AI chuyên nghiệp. Hãy tạo một bài giảng chi tiết và có cấu trúc rõ ràng cho yêu cầu sau.
+                const fullPrompt = `Bạn là một gia sư AI chuyên nghiệp. Hãy tạo một bài giảng chi tiết và có cấu trúc rõ ràng cho yêu cầu sau.
         QUY TẮC TRÌNH BÀY (RẤT QUAN TRỌNG):
         1.  **Tiêu đề chính:** Bắt đầu bằng một tiêu đề chính (ví dụ: \`# Giới thiệu về Thì Hiện tại Đơn\`).
         2.  **Cấu trúc rõ ràng:** Sử dụng các tiêu đề phụ (\`##\`, \`###\`) để chia nhỏ các phần như "Định nghĩa", "Cách dùng", "Cấu trúc", "Ví dụ".
         3.  **Làm nổi bật:** Khi liệt kê các mục, hãy **in đậm** thuật ngữ chính ở đầu mỗi mục (ví dụ: \`- **Chủ ngữ (Subject):** Là...\`).
-        4.  **Ví dụ:** Đặt tất cả các câu ví dụ trong khối trích dẫn (\`> Ví dụ: She reads a book.\`).
-        5.  **Ghi chú:** Các lưu ý quan trọng hoặc mẹo nên được đặt trong khối trích dẫn và bắt đầu bằng "Lưu ý:" (ví dụ: \`> **Lưu ý:** Đối với ngôi thứ ba số ít...\`).
-        6.  **Ngôn ngữ:** Giảng bài hoàn toàn bằng tiếng Việt.
+        4.  **Các khối nổi bật (Callout Boxes) - RẤT QUAN TRỌNG:**
+            *   **Ví dụ:** Đặt TẤT CẢ các câu ví dụ trong khối trích dẫn Markdown và LUÔN BẮT ĐẦU bằng \`> **Ví dụ:** \` (ví dụ: \`> **Ví dụ:** She reads a book.\`).
+            *   **Lưu ý/Mẹo quan trọng:** Các lưu ý hoặc mẹo quan trọng nên được đặt trong khối trích dẫn Markdown và LUÔN BẮT ĐẦU bằng \`> **Lưu ý:** \` hoặc \`> **Mẹo:** \` (ví dụ: \`> **Lưu ý:** Đối với ngôi thứ ba số ít...\`).
+        5.  **Ngôn ngữ:** Giảng bài hoàn toàn bằng tiếng Việt.
+        6.  **Công thức toán học:** Luôn sử dụng định dạng KaTeX cho các công thức (\`$\` cho inline, \`$$\` cho block).
 
         YÊU CẦU CỦA HỌC VIÊN: "${prompt}"`;
         
@@ -2028,13 +2030,37 @@ function renderLessonContent(responseText, prompt, buttonElement) {
     const formattedContent = marked.parse(responseText);
     
     // UPDATED: Title is now a toggle button
+        // Create a temporary div to manipulate the HTML before adding to DOM
+    const tempDiv = document.createElement('div');
+    tempDiv.innerHTML = `<div class="prose max-w-none text-gray-700 dark:text-gray-300">${DOMPurify.sanitize(formattedContent, { ADD_TAGS: ["iframe"], ADD_ATTR: ['allow', 'allowfullscreen', 'frameborder', 'scrolling'] })}</div>`;
+
+    // Apply specific classes to blockquotes based on content
+    tempDiv.querySelectorAll('blockquote').forEach(bq => {
+        const firstParagraph = bq.querySelector('p');
+        if (firstParagraph) {
+            let strongElement = firstParagraph.querySelector('strong');
+            if (strongElement) {
+                const textContent = strongElement.textContent.trim();
+                if (textContent.startsWith('Ví dụ:')) {
+                    bq.classList.add('example');
+                    // Remove "Ví dụ:" from the content of the strong tag
+                    strongElement.textContent = strongElement.textContent.replace('Ví dụ:', '').trim();
+                } else if (textContent.startsWith('Lưu ý:') || textContent.startsWith('Mẹo:')) {
+                    bq.classList.add('note');
+                    // Remove "Lưu ý:" or "Mẹo:" from the content of the strong tag
+                    strongElement.textContent = strongElement.textContent.replace(/Lưu ý:|Mẹo:/, '').trim();
+                }
+            }
+        }
+    });
+
     const lessonTitleEl = document.createElement('h3');
     lessonTitleEl.className = 'text-xl font-bold text-gray-800 dark:text-gray-200 lesson-title-toggle';
     lessonTitleEl.textContent = buttonElement.textContent.trim();
     
     const lessonBodyEl = document.createElement('div');
     lessonBodyEl.className = 'lesson-body';
-    lessonBodyEl.innerHTML = `<div class="prose max-w-none text-gray-700 dark:text-gray-300">${DOMPurify.sanitize(formattedContent, { ADD_TAGS: ["iframe"], ADD_ATTR: ['allow', 'allowfullscreen', 'frameborder', 'scrolling'] })}</div>`;
+    lessonBodyEl.appendChild(tempDiv.firstElementChild); // Append the .prose div from tempDiv
 
     lessonContainer.innerHTML = ''; // Clear previous content or spinner
     lessonContainer.appendChild(lessonTitleEl);
