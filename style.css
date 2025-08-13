@@ -137,7 +137,7 @@ body {
     transition: all 0.3s ease;
 }
 
-/* NEW: Styling for Learning Mode Content */
+/* Styling for Learning Mode Content */
 .learning-item .prose h3, .learning-item .prose h4 {
     color: #4f46e5; /* indigo-600 */
     padding-bottom: 0.5rem;
@@ -155,6 +155,35 @@ body {
     border-left-color: #a5b4fc; /* indigo-300 */
     background-color: #3730a3; /* indigo-800 */
     color: #e0e7ff; /* indigo-100 */
+}
+
+/* NEW: Collapsible Lesson Styles */
+.lesson-title-toggle {
+    cursor: pointer;
+    position: relative;
+    padding-right: 2rem; /* Space for the icon */
+}
+.lesson-title-toggle::after {
+    content: '▼';
+    position: absolute;
+    right: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    transition: transform 0.3s ease;
+    font-size: 0.8em;
+}
+.learning-item.collapsed .lesson-title-toggle::after {
+    transform: translateY(-50%) rotate(-90deg);
+}
+.lesson-body {
+    max-height: 10000px; /* A large value */
+    overflow: hidden;
+    transition: max-height 0.5s ease-in-out, margin-top 0.5s ease-in-out;
+    margin-top: 1rem;
+}
+.learning-item.collapsed .lesson-body {
+    max-height: 0;
+    margin-top: 0;
 }
 
 
@@ -253,7 +282,6 @@ body {
     text-align: left;
     transition: all 0.2s ease-in-out;
 }
-/* UPDATED: Hover effect for lesson links */
 .learning-link:hover {
     background-color: hsl(var(--accent));
     border-color: hsl(var(--ring));
@@ -502,3 +530,34 @@ body {
     transform: scale(0.95); transition: transform 0.3s ease-in-out;
 }
 .modal-overlay.active .modal-content { transform: scale(1); }
+
+/* NEW: Scroll to Top Button Styles */
+#scroll-to-top-btn {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    background-color: hsl(var(--primary));
+    color: hsl(var(--primary-foreground));
+    border: none;
+    border-radius: 50%;
+    width: 50px;
+    height: 50px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(20px);
+    transition: opacity 0.3s, visibility 0.3s, transform 0.3s;
+    z-index: 999;
+}
+#scroll-to-top-btn.visible {
+    opacity: 1;
+    visibility: visible;
+    transform: translateY(0);
+}
+#scroll-to-top-btn:hover {
+    opacity: 0.9;
+}
