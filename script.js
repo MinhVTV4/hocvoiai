@@ -159,6 +159,24 @@ Bạn là một người hướng dẫn học tập chuyên nghiệp, có khả 
 `;
 
 // --- Utility Functions ---
+// NEW: Typing effect utility
+function animateTyping(element, text, delay = 50) {
+    if (typeof element === 'string') {
+        element = document.getElementById(element);
+    }
+    if (!element) return;
+
+    element.textContent = ''; // Clear existing text
+    let i = 0;
+    function type() {
+        if (i < text.length) {
+            element.textContent += text.charAt(i);
+            i++;
+            setTimeout(type, delay);
+        }
+    }
+    type();
+}
 function sanitizeString(str) {
     if (!str) return '';
     return str.replace(/[\u0000-\u001F\u007F-\u009F]/g, '');
@@ -1893,11 +1911,19 @@ async function startLearningSession() {
         return;
     }
 
-    learningPathTitle.textContent = `Lộ trình học: ${topic}`;
+        learningPathTitle.textContent = `Lộ trình học: ${topic}`;
     learningPathSubject.textContent = subjectSelect.options[subjectSelect.selectedIndex].text;
     switchView('learning');
-    // UPDATED: Added descriptive loading message
-    learningContent.innerHTML = `<div class="text-center p-6 card"><div class="spinner h-8 w-8 mx-auto mb-4"></div><p class="font-semibold text-lg">AI đang tạo lộ trình học, vui lòng chờ...</p></div>`;
+    // MODIFIED: Added a span with ID for typing effect
+    const loadingMessage = "AI đang tạo lộ trình học, vui lòng chờ...";
+    learningContent.innerHTML = `
+        <div class="text-center p-6 card">
+            <div class="spinner h-8 w-8 mx-auto mb-4"></div>
+            <p class="font-semibold text-lg"><span id="loading-typing-text"></span></p>
+        </div>
+    `;
+    // NEW: Call animateTyping on the specific span
+    animateTyping('loading-typing-text', loadingMessage, 70); // Adjust delay as needed
 
     try {
         const prompt = `Bạn là một người hướng dẫn học tập chuyên nghiệp, có khả năng chia nhỏ các chủ đề phức tạp thành một lộ trình học tập rõ ràng.
