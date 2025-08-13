@@ -148,6 +148,8 @@ const synth = window.speechSynthesis;
 let audioState = { utterance: null, isPaused: false };
 let completedTopics = []; // For learning mode
 let learningCache = {}; // NEW: Cache for learning mode lessons
+let lastWritingFeedback = null; // To store writing feedback
+let lastConversationFeedback = null; // To store conversation feedback
 
 // --- System Prompt for Learning Mode ---
 const LEARNING_MODE_SYSTEM_PROMPT = `**CHỈ THỊ HỆ THỐNG - CHẾ ĐỘ HỌC TẬP ĐANG BẬT**
@@ -196,8 +198,9 @@ function getListeningPrompt(level, topic, count, length) {
 function getWritingTopicPrompt(level, topic) { 
     return `You are an English teacher. Generate a single, engaging writing topic for an English learner at the ${level} CEFR level. The topic should be related to "${topic}". The topic should be a question or a statement to respond to. Provide only the topic text, without any extra labels or quotation marks. Example: "Describe your favorite kind of technology and explain why you like it."`; 
 }
-function getWritingFeedbackPrompt(level, topic, userText) { 
-    return `You are an expert English writing evaluator. A student at the ${level} CEFR level has written the following text about the topic "${topic}". IMPORTANT: The 'correctedTextHTML' field in your response MUST be a direct correction of the student's provided text below, using "<del>" and "<ins>" tags. Do not invent a new text. Student's text: """ ${userText} """ Please provide feedback in Vietnamese. You MUST wrap your entire response in a 'json' markdown code block. The JSON object must have the following structure: 1. "overallFeedback": A general comment in Vietnamese (2-3 sentences) on the text's content, clarity, and effort. 2. "score": An integer score from 0 to 100. 3. "correctedTextHTML": The student's original text with corrections applied. 4. "detailedFeedback": An array of objects, where each object explains a specific mistake. Each object should have: "type", "mistake", "correction", "explanation". Example of the required JSON output: \`\`\`json\n{ "overallFeedback": "...", "score": 75, "correctedTextHTML": "...", "detailedFeedback": [ { "type": "Grammar", "mistake": "...", "correction": "...", "explanation": "..." } ] }\n\`\`\``; 
+// UPDATED: Added writingPrompt parameter for context
+function getWritingFeedbackPrompt(level, topic, writingPrompt, userText) { 
+    return `You are an expert English writing evaluator. A student at the ${level} CEFR level has written the following text in response to the prompt: "${writingPrompt}". The general topic is "${topic}". IMPORTANT: The 'correctedTextHTML' field in your response MUST be a direct correction of the student's provided text below, using "<del>" and "<ins>" tags. Do not invent a new text. Student's text: """ ${userText} """ Please provide feedback in Vietnamese. You MUST wrap your entire response in a 'json' markdown code block. The JSON object must have the following structure: 1. "overallFeedback": A general comment in Vietnamese (2-3 sentences) on the text's content, clarity, and how well it addresses the prompt. 2. "score": An integer score from 0 to 100. 3. "correctedTextHTML": The student's original text with corrections applied. 4. "detailedFeedback": An array of objects, where each object explains a specific mistake. Each object should have: "type", "mistake", "correction", "explanation". Example of the required JSON output: \`\`\`json\n{ "overallFeedback": "...", "score": 75, "correctedTextHTML": "...", "detailedFeedback": [ { "type": "Grammar", "mistake": "...", "correction": "...", "explanation": "..." } ] }\n\`\`\``; 
 }
 function getConversationStartPrompt(topic) { 
     return `You are a friendly, encouraging English conversation partner. Start a conversation with the user about the topic: "${topic}". Ask a simple, open-ended question to begin. Keep your opening short and natural.`; 
@@ -283,23 +286,27 @@ function switchView(view) {
 
 function resetQuizState() {
     allQuestions = [];
-    currentQuizData = {};
+    currentQuizData = {}; 
     currentQuestionIndex = 0;
     score = 0;
+    generatedExercisesCache = [];
     sessionResults = [];
+    conversationHistory = [];
+    completedTopics = []; // For learning mode
+    learningCache = {}; // NEW: Cache for learning mode lessons
+    lastWritingFeedback = null; // To store writing feedback
+    lastConversationFeedback = null; // To store conversation feedback
+
     exerciseListContainer.innerHTML = '';
     interactiveQuestionHost.innerHTML = '';
     interactiveFooter.innerHTML = '';
     document.getElementById('interactive-passage-host').innerHTML = '';
     learningContent.innerHTML = '';
-    completedTopics = [];
     paperScore.classList.add('hidden');
     if (practiceActionsContainer) practiceActionsContainer.classList.add('hidden');
     if (checkAllAnswersButton) checkAllAnswersButton.style.display = 'block';
     summarySaveStatus.textContent = '';
-    conversationHistory = [];
     conversationLog.innerHTML = '';
-    learningCache = {}; // Reset cache
 }
 
 // --- NEW: Functions for reinforcement and expansion ---
@@ -404,6 +411,7 @@ async function startPractice() {
 }
 
 // --- LISTENING FEATURE ---
+// UPDATED: Standardizes data structure to fix bugs
 async function startListeningPractice() {
     if (!model) { updateStatus('error', "Mô hình AI chưa được khởi tạo."); return; }
     setLoadingState(true);
@@ -434,7 +442,23 @@ async function startListeningPractice() {
         }
         
         currentQuizData.raw = parsedData;
-        generatedExercisesCache = parsedData.questions;
+        
+        // --- FIX: Standardize question data structure ---
+        const standardizedQuestions = parsedData.questions.map(q => {
+            const correctIndex = q.options.indexOf(q.answer);
+            return {
+                name: 'createMultipleChoiceQuestion',
+                args: {
+                    question: q.question,
+                    options: q.options,
+                    correctAnswerIndex: correctIndex !== -1 ? correctIndex : 0, // Fallback to 0 if not found
+                    explanation: q.explanation
+                }
+            };
+        });
+
+        generatedExercisesCache = standardizedQuestions;
+        allQuestions = standardizedQuestions; // This fixes both Practice and Interactive mode bugs
         
         switchView('exercise');
         renderListeningQuiz();
@@ -457,11 +481,11 @@ function renderListeningQuiz() {
     if (modeSelect.value === 'practice') {
         practiceModeContainer.classList.remove('hidden');
         interactiveModeContainer.classList.add('hidden');
-        renderPracticeMode(generatedExercisesCache);
+        renderPracticeMode(allQuestions); // Use allQuestions now
     } else {
         practiceModeContainer.classList.add('hidden');
         interactiveModeContainer.classList.remove('hidden');
-        renderInteractiveMode(generatedExercisesCache);
+        renderInteractiveMode(allQuestions); // Use allQuestions now
     }
 }
 
@@ -485,6 +509,9 @@ async function startWritingPractice() {
         const result = await model.generateContent(prompt);
         const response = await result.response;
         const topicText = response.text();
+        
+        // --- FIX: Store the specific writing prompt ---
+        currentQuizData.writingPrompt = topicText;
 
         writingTopic.textContent = topicText;
         writingInput.value = '';
@@ -519,8 +546,9 @@ async function getWritingFeedback() {
     writingInput.disabled = true;
 
     try {
-        const { level, topic } = currentQuizData;
-        const prompt = getWritingFeedbackPrompt(level, topic, userText);
+        const { level, topic, writingPrompt } = currentQuizData;
+        // --- FIX: Pass the specific writing prompt for context ---
+        const prompt = getWritingFeedbackPrompt(level, topic, writingPrompt, userText);
         const result = await model.generateContent(prompt);
         const response = await result.response;
         const feedbackData = extractAndParseJson(response.text());
@@ -529,7 +557,8 @@ async function getWritingFeedback() {
             showError("AI không trả về phản hồi hợp lệ. Vui lòng thử lại.");
             throw new Error("Invalid feedback data from AI.");
         }
-
+        
+        lastWritingFeedback = feedbackData; // Store feedback for reinforcement/expansion
         displayWritingFeedback(feedbackData);
         writingActionsContainer.classList.remove('hidden');
 
@@ -569,6 +598,25 @@ function displayWritingFeedback(data) {
             </div>
         </div>
     `;
+    
+    // --- NEW: Add reinforcement/expansion buttons ---
+    const actionsContainer = document.getElementById('writing-actions-container');
+    actionsContainer.innerHTML = ''; // Clear existing buttons
+    
+    const reinforceBtn = document.createElement('button');
+    reinforceBtn.className = 'btn btn-secondary';
+    reinforceBtn.innerHTML = `<i data-lucide="shield-question" class="w-5 h-5 mr-2"></i> Cải thiện lỗi sai`;
+    reinforceBtn.onclick = handleWritingReinforcement;
+    
+    const expandBtn = document.createElement('button');
+    expandBtn.className = 'btn btn-secondary';
+    expandBtn.innerHTML = `<i data-lucide="sparkles" class="w-5 h-5 mr-2"></i> Nâng cao bài viết`;
+    expandBtn.onclick = handleWritingExpansion;
+
+    actionsContainer.appendChild(reinforceBtn);
+    actionsContainer.appendChild(expandBtn);
+    actionsContainer.classList.remove('hidden');
+    lucide.createIcons();
 }
 
 // --- CONVERSATION FEATURE ---
@@ -653,6 +701,7 @@ async function endConversationAndGetFeedback() {
             throw new Error("Invalid conversation feedback from AI."); 
         }
         
+        lastConversationFeedback = feedbackData; // Store feedback
         displayConversationFeedback(feedbackData);
 
     } catch(error) {
@@ -698,7 +747,16 @@ function displayConversationFeedback(data) {
                 `).join('')}
             </div>
         </div>
+        <!-- NEW: Add reinforcement/expansion buttons -->
+        <div class="mt-6 flex justify-center gap-4">
+            <button id="conversation-reinforce-btn" class="btn btn-secondary"><i data-lucide="shield-question" class="w-5 h-5 mr-2"></i> Luyện tập lỗi sai</button>
+            <button id="conversation-expand-btn" class="btn btn-secondary"><i data-lucide="sparkles" class="w-5 h-5 mr-2"></i> Thử thách nâng cao</button>
+        </div>
     `;
+    
+    document.getElementById('conversation-reinforce-btn').onclick = handleConversationReinforcement;
+    document.getElementById('conversation-expand-btn').onclick = handleConversationExpansion;
+    lucide.createIcons();
 }
 
 
@@ -1221,8 +1279,8 @@ function renderPracticeMode(questionsToRender) {
     let questionCounter = 0;
     questionsToRender.forEach((item, index) => {
         const isListeningQuestion = currentQuizData.type === 'listening';
-        const args = isListeningQuestion ? item : item.args;
-        const name = isListeningQuestion ? 'createMultipleChoiceQuestion' : item.name;
+        const args = isListeningQuestion ? item.args : item.args; // Now standardized
+        const name = isListeningQuestion ? item.name : item.name; // Now standardized
         const renderFunction = renderers[name];
         
         if (renderFunction) {
@@ -1862,6 +1920,7 @@ function renderLearningPath(text) {
     learningContent.innerHTML = ''; // Clear spinner
     const pathContainer = document.createElement('div');
     pathContainer.className = 'learning-item';
+    pathContainer.id = 'lesson-path'; // Add an ID to prevent it from being collapsed
     
     const tempDiv = document.createElement('div');
     tempDiv.innerHTML = marked.parse(text);
@@ -1897,6 +1956,7 @@ async function fetchAndDisplayLesson(prompt, buttonElement) {
     let lessonContainer = document.getElementById(lessonContainerId);
 
     if (lessonContainer) {
+        lessonContainer.classList.remove('collapsed');
         lessonContainer.scrollIntoView({ behavior: 'smooth', block: 'center' });
         return;
     }
