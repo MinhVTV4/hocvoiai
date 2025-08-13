@@ -1309,7 +1309,7 @@ function displayCurrentInteractiveQuestion() {
 // UPDATED: Interactive Mode Answer Checking Logic
 function checkInteractiveAnswer(questionIndex) {
     const questionItem = interactiveQuestionHost.querySelector('.question-item');
-    const { isCorrect, isGraded, userAnswer } = checkSingleAnswer(questionItem, true, questionIndex);
+    const { isCorrect, isGraded, userAnswer } = checkSingleAnswer(questionItem, true);
     
     sessionResults.push({
         question: allQuestions[questionIndex],
@@ -1515,6 +1515,7 @@ function checkSingleAnswer(q, showFeedback = false) {
 }
 
 
+// UPDATED: Practice Mode Answer Checking
 function checkAllPracticeAnswers() {
     let totalScore = 0; 
     let gradableQuestions = 0;
@@ -1527,8 +1528,9 @@ function checkAllPracticeAnswers() {
             const result = checkSingleAnswer(q_element, true);
             
             const questionData = allQuestions[mainIndex];
+            const args = questionData.args || questionData;
             sessionResults.push({
-                question: questionData.args || questionData,
+                question: args,
                 userAnswer: result.userAnswer,
                 isCorrect: result.isCorrect
             });
@@ -1536,6 +1538,30 @@ function checkAllPracticeAnswers() {
             if (result.isGraded) { 
                 gradableQuestions++; 
                 if (result.isCorrect) totalScore++; 
+                
+                // --- NEW LOGIC TO ADD BUTTONS ---
+                const feedbackDiv = q_element.querySelector('.feedback-box');
+                if (feedbackDiv) {
+                    const buttonContainer = document.createElement('div');
+                    buttonContainer.className = 'mt-4';
+                    if (result.isCorrect) {
+                        const expandBtn = document.createElement('button');
+                        expandBtn.innerHTML = `<i data-lucide="sparkles" class="w-4 h-4 mr-2 inline-block"></i>Mở rộng kiến thức`;
+                        expandBtn.className = 'btn bg-teal-600 hover:bg-teal-700 text-white text-sm';
+                        expandBtn.onclick = () => requestExpandedKnowledge(args);
+                        buttonContainer.appendChild(expandBtn);
+                    } else {
+                        const reinforceBtn = document.createElement('button');
+                        reinforceBtn.innerHTML = `<i data-lucide="shield-question" class="w-4 h-4 mr-2 inline-block"></i>Củng cố kiến thức`;
+                        reinforceBtn.className = 'btn bg-purple-600 hover:bg-purple-700 text-white text-sm';
+                        reinforceBtn.onclick = () => {
+                            const finalUserAnswer = result.userAnswer || "(không chọn đáp án)";
+                            requestReinforcement(args, finalUserAnswer);
+                        };
+                        buttonContainer.appendChild(reinforceBtn);
+                    }
+                    feedbackDiv.appendChild(buttonContainer);
+                }
             }
         }
     });
@@ -1553,6 +1579,7 @@ function checkAllPracticeAnswers() {
     lucide.createIcons();
     renderMath(exerciseListContainer);
 }
+
 
 // --- Drag & Drop ---
 function addDragDropHandlers(list) {
