@@ -159,6 +159,65 @@ Bạn là một người hướng dẫn học tập chuyên nghiệp, có khả 
 `;
 
 // --- Utility Functions ---
+// NEW: Typing effect utility
+function animateTyping(element, text, typingDelay = 50, ellipsisDelay = 400) {
+    if (typeof element === 'string') {
+        element = document.getElementById(element);
+    }
+    if (!element) return () => {}; // Return a no-op stop function
+
+    let charIndex = 0;
+    let ellipsisInterval;
+    let typingTimeout;
+    let stopRequested = false; // Flag to stop animations gracefully
+
+    function resetElement() {
+        if (element) {
+            element.textContent = ''; // Clear text completely when stopped
+        }
+    }
+
+    function stopAnimation() {
+        stopRequested = true;
+        clearTimeout(typingTimeout);
+        clearInterval(ellipsisInterval);
+        resetElement(); // Ensure element is clean after stopping
+    }
+
+    function typeCharacter() {
+        if (stopRequested) {
+            resetElement();
+            return;
+        }
+        if (charIndex < text.length) {
+            element.textContent += text.charAt(charIndex);
+            charIndex++;
+            typingTimeout = setTimeout(typeCharacter, typingDelay);
+        } else {
+            // Typing complete, start ellipsis animation
+            startEllipsis();
+        }
+    }
+
+    function startEllipsis() {
+        let dotCount = 0;
+        ellipsisInterval = setInterval(() => {
+            if (stopRequested) {
+                clearInterval(ellipsisInterval);
+                resetElement();
+                return;
+            }
+            dotCount = (dotCount + 1) % 4; // Cycles 0, 1, 2, 3
+            element.textContent = text + ".".repeat(dotCount);
+        }, ellipsisDelay);
+    }
+
+    // Clear element before starting to ensure a fresh animation
+    element.textContent = ''; 
+    typeCharacter(); // Start the typing animation
+
+    return stopAnimation; // Return the function to stop animation later
+}
 function sanitizeString(str) {
     if (!str) return '';
     return str.replace(/[\u0000-\u001F\u007F-\u009F]/g, '');
@@ -1882,7 +1941,9 @@ function setupAudioPlayer() {
 
 // --- LEARNING MODE FUNCTIONS ---
 async function startLearningSession() {
-    if (!model) { updateStatus('error', "Mô hình AI chưa được khởi tạo."); return; }
+    if (!model) {
+        stopLearningPathAnimation(); // Stop animation on error updateStatus('error', "Mô hình AI chưa được khởi tạo."); return; stopLearningPathAnimation(); // Stop animation on success
+}
     setLoadingState(true);
     resetQuizState();
 
@@ -1893,11 +1954,21 @@ async function startLearningSession() {
         return;
     }
 
-    learningPathTitle.textContent = `Lộ trình học: ${topic}`;
+        learningPathTitle.textContent = `Lộ trình học: ${topic}`;
     learningPathSubject.textContent = subjectSelect.options[subjectSelect.selectedIndex].text;
-    switchView('learning');
-    // UPDATED: Added descriptive loading message
-    learningContent.innerHTML = `<div class="text-center p-6 card"><div class="spinner h-8 w-8 mx-auto mb-4"></div><p class="font-semibold text-lg">AI đang tạo lộ trình học, vui lòng chờ...</p></div>`;
+            switchView('learning');
+        
+        // MODIFIED: Setup the element for typing effect and start animation
+        const loadingMessageBase = "AI đang tạo lộ trình học, vui lòng chờ"; // Base message without ellipses
+        learningContent.innerHTML = `
+            <div class="text-center p-6 card">
+                <div class="spinner h-8 w-8 mx-auto mb-4"></div>
+                <p class="font-semibold text-lg"><span id="learning-path-loading-text"></span></p>
+            </div>
+        `;
+        const loadingTextElement = document.getElementById('learning-path-loading-text');
+        // Start animation and get the stop function
+        const stopLearningPathAnimation = animateTyping(loadingTextElement, loadingMessageBase, 70, 400); // 70ms typing, 400ms ellipsis
 
     try {
         const prompt = `Bạn là một người hướng dẫn học tập chuyên nghiệp, có khả năng chia nhỏ các chủ đề phức tạp thành một lộ trình học tập rõ ràng.
@@ -1952,7 +2023,9 @@ function renderLearningPath(text) {
 }
 
 async function fetchAndDisplayLesson(prompt, buttonElement) {
-    const lessonContainerId = `lesson-${prompt.replace(/[^a-zA-Z0-9]/g, '')}`;
+    const lessonContainerId = `lesson-${
+        stopLessonAnimation(); // Stop animation on errorprompt.replace(/[^a-zA-Z0-9]/g, '')        stopLessonAnimation(); // Stop animation on success
+}`;
     let lessonContainer = document.getElementById(lessonContainerId);
 
     if (lessonContainer) {
@@ -1977,12 +2050,18 @@ async function fetchAndDisplayLesson(prompt, buttonElement) {
         }
     });
 
-    lessonContainer = document.createElement('div');
+        lessonContainer = document.createElement('div');
     lessonContainer.id = lessonContainerId;
     lessonContainer.className = 'learning-item fade-in';
-    lessonContainer.innerHTML = `<div class="text-center p-4"><div class="spinner h-6 w-6 mx-auto mb-3"></div><p class="font-semibold">AI đang tạo nội dung bài học...</p></div>`;
+    // MODIFIED: Added a span with dynamic ID for typing effect
+    const lessonLoadingMessageBase = "AI đang tạo nội dung bài học";
+    lessonContainer.innerHTML = `<div class="text-center p-4"><div class="spinner h-6 w-6 mx-auto mb-3"></div><p class="font-semibold"><span id="lesson-loading-text-${lessonContainerId}">${lessonLoadingMessageBase}</span></p></div>`;
     learningContent.appendChild(lessonContainer);
     lessonContainer.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+    const lessonLoadingTextElement = document.getElementById(`lesson-loading-text-${lessonContainerId}`);
+    // Start animation and get the stop function
+    const stopLessonAnimation = animateTyping(lessonLoadingTextElement, lessonLoadingMessageBase, 70, 400);
 
     try {
         // UPDATED: New, more detailed prompt for lesson content
