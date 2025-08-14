@@ -1,8 +1,11 @@
+<!-- NOTE: I have added all the necessary JavaScript logic to save, update, and resume learning paths using Firestore. This includes new functions like renderLearningPathHistory and resumeLearningPath, and updates to existing functions to handle the new data flow. -->
+```javascript
 // --- Firebase and Gemini Initialization ---
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.9.0/firebase-app.js";
 import { getAI, getGenerativeModel } from "https://www.gstatic.com/firebasejs/11.9.0/firebase-ai.js";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.9.0/firebase-auth.js";
-import { getFirestore, collection, addDoc, query, where, getDocs, orderBy, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.9.0/firebase-firestore.js";
+// UPDATED: Added doc, getDoc, updateDoc, arrayUnion for saving learning paths
+import { getFirestore, collection, addDoc, query, where, getDocs, orderBy, serverTimestamp, doc, getDoc, updateDoc, arrayUnion } from "https://www.gstatic.com/firebasejs/11.9.0/firebase-firestore.js";
 
 // Your web app's Firebase configuration
 const firebaseConfig = {
@@ -42,14 +45,19 @@ const historyBtn = document.getElementById('history-btn');
 const backToMainBtn = document.getElementById('back-to-main-btn');
 const historyLoadingSpinner = document.getElementById('history-loading-spinner');
 
+// History Tabs and Content
 const practiceTab = document.getElementById('practice-tab');
 const interactiveTab = document.getElementById('interactive-tab');
+const learningPathTab = document.getElementById('learning-path-tab'); // NEW
 const practiceHistoryContent = document.getElementById('practice-history-content');
 const interactiveHistoryContent = document.getElementById('interactive-history-content');
+const learningPathHistoryContent = document.getElementById('learning-path-history-content'); // NEW
 const practiceHistoryList = document.getElementById('practice-history-list');
 const interactiveHistoryList = document.getElementById('interactive-history-list');
+const learningPathHistoryList = document.getElementById('learning-path-history-list'); // NEW
 const noPracticeHistory = document.getElementById('no-practice-history');
 const noInteractiveHistory = document.getElementById('no-interactive-history');
+const noLearningPathHistory = document.getElementById('no-learning-path-history'); // NEW
 
 const lessonModal = document.getElementById('lesson-modal');
 const lessonTitle = document.getElementById('lesson-title');
@@ -147,9 +155,10 @@ let conversationHistory = [];
 const synth = window.speechSynthesis;
 let audioState = { utterance: null, isPaused: false };
 let completedTopics = []; // For learning mode
-let learningCache = {}; // NEW: Cache for learning mode lessons
+let learningCache = {}; // Cache for learning mode lessons
 let lastWritingFeedback = null; // To store writing feedback
 let lastConversationFeedback = null; // To store conversation feedback
+let currentLearningPathId = null; // NEW: To track the active learning path document ID
 
 // --- System Prompt for Learning Mode ---
 const LEARNING_MODE_SYSTEM_PROMPT = `**CHỈ THỊ HỆ THỐNG - CHẾ ĐỘ HỌC TẬP ĐANG BẬT**
@@ -159,7 +168,6 @@ Bạn là một người hướng dẫn học tập chuyên nghiệp, có khả 
 `;
 
 // --- Utility Functions ---
-// NEW: Typing effect utility
 function animateTyping(element, text, delay = 50) {
     if (typeof element === 'string') {
         element = document.getElementById(element);
@@ -195,7 +203,6 @@ function extractAndParseJson(rawText) {
     }
 }
 
-// NEW: Modal Alert Function
 function showModalAlert(message) {
     alertModalText.textContent = message;
     alertModal.classList.add('active');
@@ -216,7 +223,6 @@ function getListeningPrompt(level, topic, count, length) {
 function getWritingTopicPrompt(level, topic) { 
     return `You are an English teacher. Generate a single, engaging writing topic for an English learner at the ${level} CEFR level. The topic should be related to "${topic}". The topic should be a question or a statement to respond to. Provide only the topic text, without any extra labels or quotation marks. Example: "Describe your favorite kind of technology and explain why you like it."`; 
 }
-// UPDATED: Added writingPrompt parameter for context
 function getWritingFeedbackPrompt(level, topic, writingPrompt, userText) { 
     return `You are an expert English writing evaluator. A student at the ${level} CEFR level has written the following text in response to the prompt: "${writingPrompt}". The general topic is "${topic}". IMPORTANT: The 'correctedTextHTML' field in your response MUST be a direct correction of the student's provided text below, using "<del>" and "<ins>" tags. Do not invent a new text. Student's text: """ ${userText} """ Please provide feedback in Vietnamese. You MUST wrap your entire response in a 'json' markdown code block. The JSON object must have the following structure: 1. "overallFeedback": A general comment in Vietnamese (2-3 sentences) on the text's content, clarity, and how well it addresses the prompt. 2. "score": An integer score from 0 to 100. 3. "correctedTextHTML": The student's original text with corrections applied. 4. "detailedFeedback": An array of objects, where each object explains a specific mistake. Each object should have: "type", "mistake", "correction", "explanation". Example of the required JSON output: \`\`\`json\n{ "overallFeedback": "...", "score": 75, "correctedTextHTML": "...", "detailedFeedback": [ { "type": "Grammar", "mistake": "...", "correction": "...", "explanation": "..." } ] }\n\`\`\``; 
 }
@@ -311,9 +317,10 @@ function resetQuizState() {
     sessionResults = [];
     conversationHistory = [];
     completedTopics = []; // For learning mode
-    learningCache = {}; // NEW: Cache for learning mode lessons
-    lastWritingFeedback = null; // To store writing feedback
-    lastConversationFeedback = null; // To store conversation feedback
+    learningCache = {}; 
+    lastWritingFeedback = null; 
+    lastConversationFeedback = null;
+    currentLearningPathId = null; // NEW: Reset current path ID
 
     exerciseListContainer.innerHTML = '';
     interactiveQuestionHost.innerHTML = '';
@@ -429,7 +436,6 @@ async function startPractice() {
 }
 
 // --- LISTENING FEATURE ---
-// UPDATED: Standardizes data structure to fix bugs
 async function startListeningPractice() {
     if (!model) { updateStatus('error', "Mô hình AI chưa được khởi tạo."); return; }
     setLoadingState(true);
@@ -461,7 +467,6 @@ async function startListeningPractice() {
         
         currentQuizData.raw = parsedData;
         
-        // --- FIX: Standardize question data structure ---
         const standardizedQuestions = parsedData.questions.map(q => {
             const correctIndex = q.options.indexOf(q.answer);
             return {
@@ -469,14 +474,14 @@ async function startListeningPractice() {
                 args: {
                     question: q.question,
                     options: q.options,
-                    correctAnswerIndex: correctIndex !== -1 ? correctIndex : 0, // Fallback to 0 if not found
+                    correctAnswerIndex: correctIndex !== -1 ? correctIndex : 0, 
                     explanation: q.explanation
                 }
             };
         });
 
         generatedExercisesCache = standardizedQuestions;
-        allQuestions = standardizedQuestions; // This fixes both Practice and Interactive mode bugs
+        allQuestions = standardizedQuestions; 
         
         switchView('exercise');
         renderListeningQuiz();
@@ -499,11 +504,11 @@ function renderListeningQuiz() {
     if (modeSelect.value === 'practice') {
         practiceModeContainer.classList.remove('hidden');
         interactiveModeContainer.classList.add('hidden');
-        renderPracticeMode(allQuestions); // Use allQuestions now
+        renderPracticeMode(allQuestions);
     } else {
         practiceModeContainer.classList.add('hidden');
         interactiveModeContainer.classList.remove('hidden');
-        renderInteractiveMode(allQuestions); // Use allQuestions now
+        renderInteractiveMode(allQuestions);
     }
 }
 
@@ -528,7 +533,6 @@ async function startWritingPractice() {
         const response = await result.response;
         const topicText = response.text();
         
-        // --- FIX: Store the specific writing prompt ---
         currentQuizData.writingPrompt = topicText;
 
         writingTopic.textContent = topicText;
@@ -565,7 +569,6 @@ async function getWritingFeedback() {
 
     try {
         const { level, topic, writingPrompt } = currentQuizData;
-        // --- FIX: Pass the specific writing prompt for context ---
         const prompt = getWritingFeedbackPrompt(level, topic, writingPrompt, userText);
         const result = await model.generateContent(prompt);
         const response = await result.response;
@@ -576,7 +579,7 @@ async function getWritingFeedback() {
             throw new Error("Invalid feedback data from AI.");
         }
         
-        lastWritingFeedback = feedbackData; // Store feedback for reinforcement/expansion
+        lastWritingFeedback = feedbackData;
         displayWritingFeedback(feedbackData);
         writingActionsContainer.classList.remove('hidden');
 
@@ -617,9 +620,8 @@ function displayWritingFeedback(data) {
         </div>
     `;
     
-    // --- NEW: Add reinforcement/expansion buttons ---
     const actionsContainer = document.getElementById('writing-actions-container');
-    actionsContainer.innerHTML = ''; // Clear existing buttons
+    actionsContainer.innerHTML = ''; 
     
     const reinforceBtn = document.createElement('button');
     reinforceBtn.className = 'btn btn-secondary';
@@ -719,7 +721,7 @@ async function endConversationAndGetFeedback() {
             throw new Error("Invalid conversation feedback from AI."); 
         }
         
-        lastConversationFeedback = feedbackData; // Store feedback
+        lastConversationFeedback = feedbackData;
         displayConversationFeedback(feedbackData);
 
     } catch(error) {
@@ -765,7 +767,6 @@ function displayConversationFeedback(data) {
                 `).join('')}
             </div>
         </div>
-        <!-- NEW: Add reinforcement/expansion buttons -->
         <div class="mt-6 flex justify-center gap-4">
             <button id="conversation-reinforce-btn" class="btn btn-secondary"><i data-lucide="shield-question" class="w-5 h-5 mr-2"></i> Luyện tập lỗi sai</button>
             <button id="conversation-expand-btn" class="btn btn-secondary"><i data-lucide="sparkles" class="w-5 h-5 mr-2"></i> Thử thách nâng cao</button>
@@ -919,7 +920,7 @@ async function generateExercises() {
 
         paperSubject.innerHTML = `<strong>Môn học:</strong> ${subjectText}`;
         switchView('exercise');
-        audioPlayerContainer.classList.add('hidden'); // Hide audio player for non-listening tasks
+        audioPlayerContainer.classList.add('hidden');
 
         if (modeSelect.value === 'practice') {
             practiceModeContainer.classList.remove('hidden');
@@ -964,7 +965,6 @@ const renderers = {
     'reading_passage': renderReadingPassage
 };
 
-// Renders a learning mode quiz (with immediate feedback button)
 const learningRenderers = {
     'multiple_choice': renderLearningMultipleChoice,
     'fill_in_the_blank': renderLearningFillInTheBlank,
@@ -1031,21 +1031,17 @@ function renderMultipleChoice(args, index) {
         });
     }
 
-    // Event Delegation for option selection
     optionsContainer.addEventListener('click', (e) => {
         const selectedCard = e.target.closest('.option-card');
         if (!selectedCard || selectedCard.disabled) return;
 
-        // Deselect other cards
         optionsContainer.querySelectorAll('.option-card').forEach(card => {
             card.classList.remove('selected');
         });
 
-        // Select the clicked card
         selectedCard.classList.add('selected');
         item.dataset.selectedAnswer = selectedCard.dataset.value;
 
-        // For interactive mode, enable the check button
         const checkButton = document.getElementById('interactive-check-btn');
         if (checkButton) checkButton.disabled = false;
     });
@@ -1157,7 +1153,6 @@ function renderShortAnswer(args, index) {
     return item;
 }
 
-// --- NEW Learning Quiz Renderers (with single check button) ---
 function renderLearningMultipleChoice(args) {
      const quizWrapper = document.createElement('div');
      quizWrapper.className = 'quiz-wrapper';
@@ -1297,8 +1292,8 @@ function renderPracticeMode(questionsToRender) {
     let questionCounter = 0;
     questionsToRender.forEach((item, index) => {
         const isListeningQuestion = currentQuizData.type === 'listening';
-        const args = isListeningQuestion ? item.args : item.args; // Now standardized
-        const name = isListeningQuestion ? item.name : item.name; // Now standardized
+        const args = isListeningQuestion ? item.args : item.args;
+        const name = isListeningQuestion ? item.name : item.name;
         const renderFunction = renderers[name];
         
         if (renderFunction) {
@@ -1372,8 +1367,6 @@ function displayCurrentInteractiveQuestion() {
     checkButton.disabled = true;
     interactiveFooter.appendChild(checkButton);
     
-    // The event listener for enabling the button is now inside renderMultipleChoice for MCQs
-    // We keep these for other question types
     interactiveQuestionHost.addEventListener('change', () => checkButton.disabled = false, { once: true });
     interactiveQuestionHost.addEventListener('input', () => checkButton.disabled = false, { once: true });
     interactiveQuestionHost.addEventListener('dragend', () => checkButton.disabled = false, { once: true });
@@ -1385,7 +1378,6 @@ function displayCurrentInteractiveQuestion() {
     renderMath(interactiveQuestionHost);
 }
 
-// UPDATED: Interactive Mode Answer Checking Logic
 function checkInteractiveAnswer(questionIndex) {
     const questionItem = interactiveQuestionHost.querySelector('.question-item');
     const { isCorrect, isGraded, userAnswer } = checkSingleAnswer(questionItem, true);
@@ -1401,16 +1393,13 @@ function checkInteractiveAnswer(questionIndex) {
         confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } }); 
     }
     
-    // Disable all inputs in the question
     questionItem.querySelectorAll('input, textarea, button').forEach(el => el.disabled = true);
     questionItem.querySelectorAll('.sortable-item').forEach(el => el.draggable = false);
     
-    // --- NEW LOGIC FOR FOOTER ---
-    interactiveFooter.innerHTML = ''; // Clear the footer
+    interactiveFooter.innerHTML = '';
     const footerContainer = document.createElement('div');
     footerContainer.className = 'flex justify-center items-center gap-4 flex-wrap';
 
-    // Add Reinforce/Expand buttons to the footer
     const questionData = allQuestions[questionIndex];
     const args = questionData.args || questionData;
     if (isGraded) {
@@ -1432,7 +1421,6 @@ function checkInteractiveAnswer(questionIndex) {
         }
     }
 
-    // Add Continue button
     const continueButton = document.createElement('button');
     continueButton.id = 'interactive-continue-btn';
     continueButton.className = 'btn btn-primary';
@@ -1594,7 +1582,6 @@ function checkSingleAnswer(q, showFeedback = false) {
 }
 
 
-// UPDATED: Practice Mode Answer Checking
 function checkAllPracticeAnswers() {
     let totalScore = 0; 
     let gradableQuestions = 0;
@@ -1618,7 +1605,6 @@ function checkAllPracticeAnswers() {
                 gradableQuestions++; 
                 if (result.isCorrect) totalScore++; 
                 
-                // --- NEW LOGIC TO ADD BUTTONS ---
                 const feedbackDiv = q_element.querySelector('.feedback-box');
                 if (feedbackDiv) {
                     const buttonContainer = document.createElement('div');
@@ -1739,9 +1725,7 @@ async function saveTestResult() {
     }
 }
 
-async function renderHistory() {
-    switchView('history');
-    historyLoadingSpinner.classList.remove('hidden');
+async function renderPracticeAndInteractiveHistory() {
     practiceHistoryList.innerHTML = '';
     interactiveHistoryList.innerHTML = '';
     noPracticeHistory.classList.add('hidden');
@@ -1752,7 +1736,6 @@ async function renderHistory() {
         noPracticeHistory.textContent = 'Vui lòng đăng nhập để xem lịch sử.';
         noInteractiveHistory.classList.remove('hidden');
         noInteractiveHistory.textContent = 'Vui lòng đăng nhập để xem lịch sử.';
-        historyLoadingSpinner.classList.add('hidden');
         return;
     }
 
@@ -1798,8 +1781,6 @@ async function renderHistory() {
         console.error("Error fetching history: ", error);
         noPracticeHistory.classList.remove('hidden');
         noPracticeHistory.textContent = 'Lỗi khi tải lịch sử.';
-    } finally {
-        historyLoadingSpinner.classList.add('hidden');
     }
 }
 
@@ -1911,10 +1892,9 @@ async function startLearningSession() {
         return;
     }
 
-        learningPathTitle.textContent = `Lộ trình học: ${topic}`;
+    learningPathTitle.textContent = `Lộ trình học: ${topic}`;
     learningPathSubject.textContent = subjectSelect.options[subjectSelect.selectedIndex].text;
     switchView('learning');
-    // MODIFIED: Added a span with ID for typing effect
     const loadingMessage = "AI đang tạo lộ trình học, vui lòng chờ...";
     learningContent.innerHTML = `
         <div class="text-center p-6 card">
@@ -1922,8 +1902,7 @@ async function startLearningSession() {
             <p class="font-semibold text-lg"><span id="loading-typing-text"></span></p>
         </div>
     `;
-    // NEW: Call animateTyping on the specific span
-    animateTyping('loading-typing-text', loadingMessage, 70); // Adjust delay as needed
+    animateTyping('loading-typing-text', loadingMessage, 70);
 
     try {
         const prompt = `Bạn là một người hướng dẫn học tập chuyên nghiệp, có khả năng chia nhỏ các chủ đề phức tạp thành một lộ trình học tập rõ ràng.
@@ -1933,6 +1912,28 @@ async function startLearningSession() {
         const result = await model.generateContent(prompt);
         const response = result.response;
         const responseText = response.text();
+
+        // NEW: Save the newly created learning path to Firestore
+        if (currentUser) {
+            try {
+                const docRef = await addDoc(collection(db, "learningPaths"), {
+                    userId: currentUser.uid,
+                    userName: currentUser.displayName,
+                    topic: topic,
+                    subject: subjectSelect.options[subjectSelect.selectedIndex].text,
+                    pathMarkdown: responseText,
+                    completedPrompts: [],
+                    lessonCache: {},
+                    createdAt: serverTimestamp(),
+                    lastAccessed: serverTimestamp()
+                });
+                currentLearningPathId = docRef.id; // Store the ID for the current session
+            } catch (e) {
+                console.error("Error saving new learning path: ", e);
+                showError("Không thể lưu lộ trình học mới. Bạn vẫn có thể học nhưng tiến độ sẽ không được lưu.");
+            }
+        }
+        
         renderLearningPath(responseText);
     } catch (error) {
         console.error("Error starting learning session:", error);
@@ -1943,10 +1944,10 @@ async function startLearningSession() {
 }
 
 function renderLearningPath(text) {
-    learningContent.innerHTML = ''; // Clear spinner
+    learningContent.innerHTML = ''; 
     const pathContainer = document.createElement('div');
     pathContainer.className = 'learning-item';
-    pathContainer.id = 'lesson-path'; // Add an ID to prevent it from being collapsed
+    pathContainer.id = 'lesson-path'; 
     
     const tempDiv = document.createElement('div');
     tempDiv.innerHTML = marked.parse(text);
@@ -1957,7 +1958,8 @@ function renderLearningPath(text) {
             const title = linkMatch[1];
             const prompt = linkMatch[2];
             const sanitizedPrompt = prompt.replace(/"/g, '&quot;');
-            const isCompleted = completedTopics.includes(sanitizedPrompt);
+            // Check against the completedTopics array to set initial state
+            const isCompleted = completedTopics.includes(prompt);
             const completedClass = isCompleted ? 'completed' : '';
             const icon = isCompleted ? '<i data-lucide="check-circle-2" class="w-5 h-5"></i>' : '<i data-lucide="circle" class="w-5 h-5"></i>';
             
@@ -1983,7 +1985,7 @@ async function fetchAndDisplayLesson(prompt, buttonElement) {
 
     if (lessonContainer) {
         lessonContainer.classList.remove('collapsed');
-                lessonContainer.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        lessonContainer.scrollIntoView({ behavior: 'smooth', block: 'start' });
         return;
     }
     
@@ -1996,9 +1998,8 @@ async function fetchAndDisplayLesson(prompt, buttonElement) {
     const iconSpan = buttonElement.querySelector('.icon');
     if (iconSpan) iconSpan.innerHTML = '<div class="spinner w-5 h-5"></div>';
     
-    // UPDATED: Collapse other lessons before creating a new one
     learningContent.querySelectorAll('.learning-item:not(.collapsed)').forEach(item => {
-        if (item.id !== `lesson-path`) { // Don't collapse the main path
+        if (item.id !== `lesson-path`) {
             item.classList.add('collapsed');
         }
     });
@@ -2011,15 +2012,14 @@ async function fetchAndDisplayLesson(prompt, buttonElement) {
     lessonContainer.scrollIntoView({ behavior: 'smooth', block: 'center' });
 
     try {
-        // UPDATED: New, more detailed prompt for lesson content
-                const fullPrompt = `Bạn là một gia sư AI chuyên nghiệp. Hãy tạo một bài giảng chi tiết và có cấu trúc rõ ràng cho yêu cầu sau.
+        const fullPrompt = `Bạn là một gia sư AI chuyên nghiệp. Hãy tạo một bài giảng chi tiết và có cấu trúc rõ ràng cho yêu cầu sau.
         QUY TẮC TRÌNH BÀY (RẤT QUAN TRỌNG):
         1.  **Tiêu đề chính:** Bắt đầu bằng một tiêu đề chính (ví dụ: \`# Giới thiệu về Thì Hiện tại Đơn\`).
         2.  **Cấu trúc rõ ràng:** Sử dụng các tiêu đề phụ (\`##\`, \`###\`) để chia nhỏ các phần như "Định nghĩa", "Cách dùng", "Cấu trúc", "Ví dụ".
         3.  **Làm nổi bật:** Khi liệt kê các mục, hãy **in đậm** thuật ngữ chính ở đầu mỗi mục (ví dụ: \`- **Chủ ngữ (Subject):** Là...\`).
         4.  **Các khối nổi bật (Callout Boxes) - RẤT QUAN TRỌNG:**
-            *   **Ví dụ:** Đặt TẤT CẢ các câu ví dụ trong khối trích dẫn Markdown và LUÔN BẮT ĐẦU bằng \`> **Ví dụ:** \` (ví dụ: \`> **Ví dụ:** She reads a book.\`).
-            *   **Lưu ý/Mẹo quan trọng:** Các lưu ý hoặc mẹo quan trọng nên được đặt trong khối trích dẫn Markdown và LUÔN BẮT ĐẦU bằng \`> **Lưu ý:** \` hoặc \`> **Mẹo:** \` (ví dụ: \`> **Lưu ý:** Đối với ngôi thứ ba số ít...\`).
+            * **Ví dụ:** Đặt TẤT CẢ các câu ví dụ trong khối trích dẫn Markdown và LUÔN BẮT ĐẦU bằng \`> **Ví dụ:** \` (ví dụ: \`> **Ví dụ:** She reads a book.\`).
+            * **Lưu ý/Mẹo quan trọng:** Các lưu ý hoặc mẹo quan trọng nên được đặt trong khối trích dẫn Markdown và LUÔN BẮT ĐẦU bằng \`> **Lưu ý:** \` hoặc \`> **Mẹo:** \` (ví dụ: \`> **Lưu ý:** Đối với ngôi thứ ba số ít...\`).
         5.  **Ngôn ngữ:** Giảng bài hoàn toàn bằng tiếng Việt.
         6.  **Công thức toán học:** Luôn sử dụng định dạng KaTeX cho các công thức (\`$\` cho inline, \`$$\` cho block).
 
@@ -2028,7 +2028,7 @@ async function fetchAndDisplayLesson(prompt, buttonElement) {
         const result = await model.generateContent(fullPrompt);
         const responseText = result.response.text();
         
-        learningCache[prompt] = responseText; // Cache the result
+        learningCache[prompt] = responseText;
         renderLessonContent(responseText, prompt, buttonElement);
 
     } catch (error) {
@@ -2055,12 +2055,9 @@ function renderLessonContent(responseText, prompt, buttonElement) {
 
     const formattedContent = marked.parse(responseText);
     
-    // UPDATED: Title is now a toggle button
-        // Create a temporary div to manipulate the HTML before adding to DOM
     const tempDiv = document.createElement('div');
     tempDiv.innerHTML = `<div class="prose max-w-none text-gray-700 dark:text-gray-300">${DOMPurify.sanitize(formattedContent, { ADD_TAGS: ["iframe"], ADD_ATTR: ['allow', 'allowfullscreen', 'frameborder', 'scrolling'] })}</div>`;
 
-    // Apply specific classes to blockquotes based on content
     tempDiv.querySelectorAll('blockquote').forEach(bq => {
         const firstParagraph = bq.querySelector('p');
         if (firstParagraph) {
@@ -2069,11 +2066,9 @@ function renderLessonContent(responseText, prompt, buttonElement) {
                 const textContent = strongElement.textContent.trim();
                 if (textContent.startsWith('Ví dụ:')) {
                     bq.classList.add('example');
-                    // Remove "Ví dụ:" from the content of the strong tag
                     strongElement.textContent = strongElement.textContent.replace('Ví dụ:', '').trim();
                 } else if (textContent.startsWith('Lưu ý:') || textContent.startsWith('Mẹo:')) {
                     bq.classList.add('note');
-                    // Remove "Lưu ý:" or "Mẹo:" from the content of the strong tag
                     strongElement.textContent = strongElement.textContent.replace(/Lưu ý:|Mẹo:/, '').trim();
                 }
             }
@@ -2086,9 +2081,9 @@ function renderLessonContent(responseText, prompt, buttonElement) {
     
     const lessonBodyEl = document.createElement('div');
     lessonBodyEl.className = 'lesson-body';
-    lessonBodyEl.appendChild(tempDiv.firstElementChild); // Append the .prose div from tempDiv
+    lessonBodyEl.appendChild(tempDiv.firstElementChild);
 
-    lessonContainer.innerHTML = ''; // Clear previous content or spinner
+    lessonContainer.innerHTML = '';
     lessonContainer.appendChild(lessonTitleEl);
     lessonContainer.appendChild(lessonBodyEl);
     
@@ -2096,14 +2091,120 @@ function renderLessonContent(responseText, prompt, buttonElement) {
     lucide.createIcons();
 
     const sanitizedPrompt = prompt.replace(/"/g, '&quot;');
-    if (!completedTopics.includes(sanitizedPrompt)) {
-        completedTopics.push(sanitizedPrompt);
+    if (!completedTopics.includes(prompt)) {
+        completedTopics.push(prompt);
     }
     buttonElement.classList.add('completed');
     const iconSpan = buttonElement.querySelector('.icon');
     if (iconSpan) iconSpan.innerHTML = '<i data-lucide="check-circle-2" class="w-5 h-5"></i>';
     lucide.createIcons();
+    
+    // NEW: Update progress in Firestore
+    if (currentUser && currentLearningPathId) {
+        try {
+            const pathRef = doc(db, "learningPaths", currentLearningPathId);
+            const lessonCacheKey = `lessonCache.${prompt}`;
+            
+            updateDoc(pathRef, {
+                completedPrompts: arrayUnion(prompt),
+                [lessonCacheKey]: responseText,
+                lastAccessed: serverTimestamp()
+            });
+        } catch (e) {
+            console.error("Error updating learning progress: ", e);
+        }
+    }
 }
+
+// --- NEW: Functions for Learning Path History ---
+async function renderLearningPathHistory() {
+    learningPathHistoryList.innerHTML = '';
+    noLearningPathHistory.classList.add('hidden');
+
+    if (!currentUser) {
+        noLearningPathHistory.classList.remove('hidden');
+        noLearningPathHistory.querySelector('p').textContent = 'Vui lòng đăng nhập để xem lộ trình đã lưu.';
+        return;
+    }
+
+    try {
+        const q = query(collection(db, "learningPaths"), where("userId", "==", currentUser.uid), orderBy("lastAccessed", "desc"));
+        const querySnapshot = await getDocs(q);
+
+        if (querySnapshot.empty) {
+            noLearningPathHistory.classList.remove('hidden');
+            return;
+        }
+
+        querySnapshot.forEach((doc) => {
+            const data = doc.data();
+            const totalLessons = (data.pathMarkdown.match(/\[([^\]]+?)\]\{"prompt":"([^"]+?)"\}/g) || []).length;
+            const completedCount = data.completedPrompts ? data.completedPrompts.length : 0;
+            const progress = totalLessons > 0 ? (completedCount / totalLessons) * 100 : 0;
+
+            const card = document.createElement('div');
+            card.className = 'card p-4 flex flex-col justify-between';
+            card.innerHTML = `
+                <div>
+                    <p class="font-bold text-lg text-gray-800 dark:text-gray-200">${data.topic}</p>
+                    <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">${data.subject}</p>
+                </div>
+                <div class="mt-4">
+                     <div class="flex justify-between text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">
+                        <span>Tiến độ</span>
+                        <span>${completedCount}/${totalLessons} bài</span>
+                     </div>
+                     <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+                        <div class="bg-indigo-500 h-2 rounded-full" style="width: ${progress}%"></div>
+                    </div>
+                </div>
+                <div class="mt-5 text-right">
+                     <button class="btn btn-primary resume-learning-btn">
+                        <i data-lucide="play" class="w-4 h-4 mr-2"></i>
+                        Tiếp tục học
+                     </button>
+                </div>
+            `;
+            // Add event listener directly to the button to avoid using global onclick
+            card.querySelector('.resume-learning-btn').addEventListener('click', () => resumeLearningPath(doc.id));
+            learningPathHistoryList.appendChild(card);
+        });
+        lucide.createIcons();
+
+    } catch (error) {
+        console.error("Error fetching learning history: ", error);
+        noLearningPathHistory.classList.remove('hidden');
+        noLearningPathHistory.querySelector('p').textContent = 'Lỗi khi tải lịch sử học tập.';
+    }
+}
+
+async function resumeLearningPath(pathId) {
+    try {
+        const pathRef = doc(db, "learningPaths", pathId);
+        const docSnap = await getDoc(pathRef);
+
+        if (docSnap.exists()) {
+            const data = docSnap.data();
+            
+            resetQuizState();
+            currentLearningPathId = pathId;
+            learningCache = data.lessonCache || {};
+            completedTopics = data.completedPrompts || [];
+
+            switchView('learning');
+            learningPathTitle.textContent = `Lộ trình học: ${data.topic}`;
+            learningPathSubject.textContent = data.subject;
+            renderLearningPath(data.pathMarkdown);
+
+        } else {
+            showError("Không tìm thấy lộ trình học này.");
+        }
+    } catch (error) {
+        console.error("Error resuming path: ", error);
+        showError("Đã có lỗi xảy ra khi tải lại lộ trình.");
+    }
+}
+
 
 // --- EVENT LISTENERS ---
 function updateButtonText() {
@@ -2178,22 +2279,50 @@ conversationTextInput.addEventListener('keydown', (e) => {
 });
 endConversationBtn.addEventListener('click', endConversationAndGetFeedback);
 
-historyBtn.addEventListener('click', renderHistory);
+historyBtn.addEventListener('click', () => {
+    switchView('history');
+    historyLoadingSpinner.classList.remove('hidden');
+    // Default to practice tab
+    practiceTab.click(); 
+    renderPracticeAndInteractiveHistory().finally(() => {
+        historyLoadingSpinner.classList.add('hidden');
+    });
+});
 backToMainBtn.addEventListener('click', () => switchView('controls'));
 
+// UPDATED: Event listeners for history tabs
 practiceTab.addEventListener('click', () => {
     practiceTab.classList.add('active');
     interactiveTab.classList.remove('active');
+    learningPathTab.classList.remove('active');
     practiceHistoryContent.classList.remove('hidden');
     interactiveHistoryContent.classList.add('hidden');
+    learningPathHistoryContent.classList.add('hidden');
 });
 
 interactiveTab.addEventListener('click', () => {
     interactiveTab.classList.add('active');
     practiceTab.classList.remove('active');
+    learningPathTab.classList.remove('active');
     interactiveHistoryContent.classList.remove('hidden');
     practiceHistoryContent.classList.add('hidden');
+    learningPathHistoryContent.classList.add('hidden');
 });
+
+learningPathTab.addEventListener('click', () => {
+    learningPathTab.classList.add('active');
+    practiceTab.classList.remove('active');
+    interactiveTab.classList.remove('active');
+    learningPathHistoryContent.classList.remove('hidden');
+    practiceHistoryContent.classList.add('hidden');
+    interactiveHistoryContent.classList.add('hidden');
+    // Load the learning path history when the tab is clicked
+    historyLoadingSpinner.classList.remove('hidden');
+    renderLearningPathHistory().finally(() => {
+        historyLoadingSpinner.classList.add('hidden');
+    });
+});
+
 
 closeLessonModal.addEventListener('click', () => lessonModal.classList.remove('active'));
 lessonModal.addEventListener('click', (event) => {
@@ -2249,7 +2378,6 @@ themeToggleBtn.addEventListener('click', () => {
 
 // --- INITIALIZATION ---
 document.addEventListener('DOMContentLoaded', () => {
-    // Load theme from local storage
     if (localStorage.getItem('theme') === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
         document.documentElement.classList.add('dark');
     } else {
