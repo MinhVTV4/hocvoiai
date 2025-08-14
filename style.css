@@ -138,113 +138,23 @@ body {
 }
 
 /* Styling for Learning Mode Content */
-.learning-item .prose {
-    line-height: 1.7;
-    font-size: 1rem;
-    color: hsl(var(--foreground)); /* Ensure text color is inherited */
-}
-.learning-item .prose p {
-    margin-bottom: 1em; /* Spacing between paragraphs */
-}
-.learning-item .prose ul,
-.learning-item .prose ol {
-    margin-left: 1.5em; /* Indent lists */
-    margin-bottom: 1em;
-}
-.learning-item .prose li {
-    margin-bottom: 0.5em;
-}
-
-.learning-item .prose h1 {
-    font-size: 2.25rem; /* text-4xl */
-    font-weight: 800; /* font-extrabold */
-    margin-top: 2em;
-    margin-bottom: 1em;
-    color: hsl(var(--foreground));
-}
-.learning-item .prose h2 {
-    font-size: 1.75rem; /* text-3xl */
-    font-weight: 700; /* font-bold */
-    margin-top: 1.5em;
-    margin-bottom: 0.75em;
+.learning-item .prose h3, .learning-item .prose h4 {
     color: #4f46e5; /* indigo-600 */
     padding-bottom: 0.5rem;
     border-bottom: 1px solid hsl(var(--border));
 }
-.dark .learning-item .prose h2 {
+.dark .learning-item .prose h3, .dark .learning-item .prose h4 {
     color: #a5b4fc; /* indigo-300 */
 }
-.learning-item .prose h3 {
-    font-size: 1.5rem; /* text-2xl */
-    font-weight: 600; /* font-semibold */
-    margin-top: 1.25em;
-    margin-bottom: 0.5em;
-    color: #6366f1; /* indigo-500 */ /* Slightly lighter for h3 */
-}
-.dark .learning-item .prose h3 {
-    color: #818cf8; /* indigo-400 */
-}
-.learning-item .prose h4 {
-    font-size: 1.25rem; /* text-xl */
-    font-weight: 600; /* font-semibold */
-    margin-top: 1em;
-    margin-bottom: 0.5em;
-    color: #6366f1; /* indigo-500 */
-}
-.dark .learning-item .prose h4 {
-    color: #818cf8; /* indigo-400 */
-}
-
-/* Base blockquote style */
 .learning-item .prose blockquote {
-    border-left: 4px solid;
-    padding: 0.75rem 1.25rem;
-    margin: 1.5em 0;
-    border-radius: 0.5rem;
-    position: relative;
-    overflow: hidden; /* For pseudo-elements */
+    border-left-color: #4f46e5; /* indigo-600 */
+    background-color: #eef2ff; /* indigo-50 */
+    padding: 0.5rem 1rem;
 }
-
-/* Example box */
-.learning-item .prose blockquote.example {
-    border-color: #3b82f6; /* blue-500 */
-    background-color: #eff6ff; /* blue-50 */
-    color: #1e40af; /* blue-800 */
-}
-.dark .learning-item .prose blockquote.example {
-    border-color: #60a5fa; /* blue-400 */
-    background-color: #1e3a8a; /* blue-900 */
-    color: #dbeafe; /* blue-100 */
-}
-
-/* Note/Tip box */
-.learning-item .prose blockquote.note {
-    border-color: #f59e0b; /* amber-500 */
-    background-color: #fffbeb; /* amber-50 */
-    color: #b45309; /* amber-800 */
-}
-.dark .learning-item .prose blockquote.note {
-    border-color: #fbbf24; /* amber-400 */
-    background-color: #78350f; /* amber-900 */
-    color: #fef3c7; /* amber-100 */
-}
-
-/* Code blocks */
-.learning-item .prose pre {
-    background-color: hsl(var(--secondary));
-    border: 1px solid hsl(var(--border));
-    border-radius: 0.5rem;
-    padding: 1rem;
-    overflow-x: auto;
-    font-family: monospace;
-    font-size: 0.9em;
-    margin: 1.5em 0;
-}
-.learning-item .prose code {
-    background-color: hsl(var(--secondary));
-    padding: 0.2em 0.4em;
-    border-radius: 0.3em;
-    font-size: 0.85em;
+.dark .learning-item .prose blockquote {
+    border-left-color: #a5b4fc; /* indigo-300 */
+    background-color: #3730a3; /* indigo-800 */
+    color: #e0e7ff; /* indigo-100 */
 }
 
 /* NEW: Collapsible Lesson Styles */
