@@ -2,7 +2,7 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.9.0/firebase-app.js";
 import { getAI, getGenerativeModel } from "https://www.gstatic.com/firebasejs/11.9.0/firebase-ai.js";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.9.0/firebase-auth.js";
-import { getFirestore, collection, addDoc, query, where, getDocs, orderBy, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.9.0/firebase-firestore.js";
+import { getFirestore, collection, addDoc, query, where, getDocs, orderBy, serverTimestamp, updateDoc } from "https://www.gstatic.com/firebasejs/11.9.0/firebase-firestore.js";
 
 // Your web app's Firebase configuration
 const firebaseConfig = {
@@ -29,7 +29,7 @@ const historyView = document.getElementById('history-view');
 const writingView = document.getElementById('writing-view');
 const conversationView = document.getElementById('conversation-view');
 const learningView = document.getElementById('learning-view');
-
+const markLessonCompletedBtn = document.getElementById('mark-lesson-completed-btn');
 const authHeader = document.getElementById('auth-header');
 const loginContainer = document.getElementById('login-container');
 const loginBtn = document.getElementById('login-btn');
@@ -343,6 +343,10 @@ async function requestReinforcement(questionArgs, userAnswer) {
             lessonContent.innerHTML = `<p class="text-red-500">Lỗi: Không thể nhận phản hồi củng cố kiến thức từ AI.</p>`;
             return;
         }
+        if (!lessonData) {
+            lessonContent.innerHTML = `<p class="text-red-500">Lỗi: Không thể nhận phản hồi củng cố kiến thức từ AI.</p>`;
+            return;
+        }
 
         lessonContent.innerHTML = `
             <h4 class="font-bold text-lg mb-2 text-purple-600 dark:text-purple-400">${lessonData.conceptTitle}</h4>
@@ -355,6 +359,8 @@ async function requestReinforcement(questionArgs, userAnswer) {
                 </ul>
                 <h5 class="font-semibold mt-4 mb-2">Mẹo luyện tập:</h5>
                 <p>${marked.parse(lessonData.practiceTip || '')}</p>
+            </div>
+        `;
             </div>
         `;
         renderMath(lessonContent);
@@ -384,6 +390,15 @@ async function requestExpandedKnowledge(questionArgs) {
             <h4 class="font-bold text-lg mb-2 text-teal-600 dark:text-teal-400">${lessonData.conceptTitle}</h4>
             <div class="prose dark:prose-invert max-w-none">
                  <p>${marked.parse(lessonData.conceptExplanation || '')}</p>
+        if (!lessonData) {
+            lessonContent.innerHTML = `<p class="text-red-500">Lỗi: Không thể nhận phản hồi mở rộng kiến thức từ AI.</p>`;
+            return;
+        }
+
+        lessonContent.innerHTML = `
+            <h4 class="font-bold text-lg mb-2 text-teal-600 dark:text-teal-400">${lessonData.conceptTitle}</h4>
+            <div class="prose dark:prose-invert max-w-none">
+                 <p>${marked.parse(lessonData.conceptExplanation || '')}</p>
                 <h5 class="font-semibold mt-4 mb-2">Ví dụ:</h5>
                 <ul class="list-disc list-inside">
                     ${(lessonData.examples || []).map(ex => `<li>${typeof ex === 'object' ? `${ex.en} - ${ex.vi}` : ex}</li>`).join('')}
@@ -392,9 +407,6 @@ async function requestExpandedKnowledge(questionArgs) {
                 <p>${marked.parse(lessonData.practiceTip || '')}</p>
             </div>
         `;
-        renderMath(lessonContent);
-    } catch (error) {
-         console.error("Lỗi khi yêu cầu mở rộng:", error);
          lessonContent.innerHTML = `<p class="text-red-500">Lỗi: Không thể kết nối với AI để mở rộng kiến thức.</p>`;
     }
 }
@@ -1735,8 +1747,59 @@ async function saveTestResult() {
         summarySaveStatus.textContent = 'Kết quả đã được lưu thành công!';
     } catch (e) {
         console.error("Error adding document: ", e);
-        summarySaveStatus.textContent = 'Lỗi khi lưu kết quả.';
+async function saveLearningProgress(lessonPrompt) {
+    if (!currentUser) {
+        showModalAlert('Vui lòng đăng nhập để lưu tiến độ học tập của bạn.');
+        return false;
     }
+
+    const topic = document.getElementById('topicInput').value.trim(); // Get current learning topic
+    if (!topic) {
+        console.error("No topic found for saving learning progress.");
+        return false;
+    }
+
+    try {
+        // Query for existing learning progress document for this user and topic
+        const q = query(collection(db, "userLearningProgress"), 
+                        where("userId", "==", currentUser.uid), 
+                        where("topic", "==", topic));
+        const querySnapshot = await getDocs(q);
+
+        if (querySnapshot.empty) {
+            // No existing document, create a new one
+            await addDoc(collection(db, "userLearningProgress"), {
+                userId: currentUser.uid,
+                userName: currentUser.displayName,
+                topic: topic,
+                completedLessons: [lessonPrompt],
+                lastUpdated: serverTimestamp()
+            });
+            console.log("New learning progress document created.");
+        } else {
+            // Document exists, update it
+            const docRef = querySnapshot.docs[0].ref;
+            const existingData = querySnapshot.docs[0].data();
+            
+            let updatedCompletedLessons = new Set(existingData.completedLessons || []);
+            if (!updatedCompletedLessons.has(lessonPrompt)) {
+                updatedCompletedLessons.add(lessonPrompt);
+                await updateDoc(docRef, {
+                    completedLessons: Array.from(updatedCompletedLessons),
+                    lastUpdated: serverTimestamp()
+                });
+                console.log("Learning progress updated.");
+            } else {
+                console.log("Lesson already marked as completed.");
+            }
+        }
+        return true;
+    } catch (e) {
+        console.error("Error saving learning progress: ", e);
+        showModalAlert('Lỗi khi lưu tiến độ học tập.');
+        return false;
+    }
+}
 }
 
 async function renderHistory() {
@@ -1910,9 +1973,6 @@ async function startLearningSession() {
         setLoadingState(false);
         return;
     }
-
-        learningPathTitle.textContent = `Lộ trình học: ${topic}`;
-    learningPathSubject.textContent = subjectSelect.options[subjectSelect.selectedIndex].text;
     switchView('learning');
     // MODIFIED: Added a span with ID for typing effect
     const loadingMessage = "AI đang tạo lộ trình học, vui lòng chờ...";
@@ -1922,6 +1982,8 @@ async function startLearningSession() {
             <p class="font-semibold text-lg"><span id="loading-typing-text"></span></p>
         </div>
     `;
+    // NEW: Call animateTyping on the specific span
+    animateTyping('loading-typing-text', loadingMessage, 70); // Adjust delay as needed
     // NEW: Call animateTyping on the specific span
     animateTyping('loading-typing-text', loadingMessage, 70); // Adjust delay as needed
 
@@ -1980,10 +2042,25 @@ function renderLearningPath(text) {
 async function fetchAndDisplayLesson(prompt, buttonElement) {
     const lessonContainerId = `lesson-${prompt.replace(/[^a-zA-Z0-9]/g, '')}`;
     let lessonContainer = document.getElementById(lessonContainerId);
-
-    if (lessonContainer) {
-        lessonContainer.classList.remove('collapsed');
-                lessonContainer.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    lessonContainer.innerHTML = ''; // Clear previous content or spinner
+    lessonContainer.appendChild(lessonTitleEl);
+    lessonContainer.appendChild(lessonBodyEl);
+    
+    // NEW: Logic for "Mark as Completed" button
+    markLessonCompletedBtn.classList.remove('hidden'); // Ensure button is visible when modal is active
+    markLessonCompletedBtn.dataset.prompt = prompt; // Store the prompt for saving
+    
+    if (completedTopics.includes(prompt)) {
+        markLessonCompletedBtn.textContent = 'Đã hoàn thành bài học này';
+        markLessonCompletedBtn.disabled = true;
+        markLessonCompletedBtn.classList.add('bg-green-600', 'hover:bg-green-700'); // Optional: change color
+        markLessonCompletedBtn.classList.remove('bg-indigo-600', 'hover:bg-indigo-700');
+    } else {
+        markLessonCompletedBtn.innerHTML = '<i data-lucide="check-circle-2" class="w-5 h-5 mr-2"></i> Đánh dấu đã hoàn thành';
+        markLessonCompletedBtn.disabled = false;
+        markLessonCompletedBtn.classList.remove('bg-green-600', 'hover:bg-green-700');
+        markLessonCompletedBtn.classList.add('bg-indigo-600', 'hover:bg-indigo-700'); // Ensure it's the primary color
+    }
         return;
     }
     
@@ -2104,9 +2181,37 @@ function renderLessonContent(responseText, prompt, buttonElement) {
     if (iconSpan) iconSpan.innerHTML = '<i data-lucide="check-circle-2" class="w-5 h-5"></i>';
     lucide.createIcons();
 }
+markLessonCompletedBtn.addEventListener('click', async () => {
+    const lessonPrompt = markLessonCompletedBtn.dataset.prompt;
+    if (lessonPrompt && !markLessonCompletedBtn.disabled) {
+        markLessonCompletedBtn.textContent = 'Đang lưu...';
+        markLessonCompletedBtn.disabled = true;
 
-// --- EVENT LISTENERS ---
-function updateButtonText() {
+        const success = await saveLearningProgress(lessonPrompt);
+        if (success) {
+            markLessonCompletedBtn.textContent = 'Đã hoàn thành bài học này';
+            markLessonCompletedBtn.classList.add('bg-green-600', 'hover:bg-green-700');
+            markLessonCompletedBtn.classList.remove('bg-indigo-600', 'hover:bg-indigo-700');
+            
+            // Find the corresponding learning-link in the path and update its icon
+            const currentLearningLink = learningContent.querySelector(`.learning-link[data-prompt="${lessonPrompt.replace(/"/g, '\"')}"]`);
+            if (currentLearningLink) {
+                currentLearningLink.classList.add('completed');
+                const iconSpan = currentLearningLink.querySelector('.icon');
+                if (iconSpan) iconSpan.innerHTML = '<i data-lucide="check-circle-2" class="w-5 h-5"></i>';
+                lucide.createIcons();
+            }
+            // Add to completedTopics if not already there, for immediate state update
+            if (!completedTopics.includes(lessonPrompt)) {
+                completedTopics.push(lessonPrompt);
+            }
+
+        } else {
+            markLessonCompletedBtn.innerHTML = '<i data-lucide="check-circle-2" class="w-5 h-5 mr-2"></i> Lỗi lưu, thử lại';
+            markLessonCompletedBtn.disabled = false;
+        }
+    }
+});
     const mode = modeSelect.value;
     if (mode === 'practice') buttonText.textContent = 'Bắt đầu Luyện tập';
     else if (mode === 'interactive') buttonText.textContent = 'Bắt đầu Tương tác';
