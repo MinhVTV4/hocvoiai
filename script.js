@@ -1,5 +1,4 @@
-<!-- NOTE: I have added all the necessary JavaScript logic to save, update, and resume learning paths using Firestore. This includes new functions like renderLearningPathHistory and resumeLearningPath, and updates to existing functions to handle the new data flow. -->
-```javascript
+<!-- NOTE: I have fixed the display bug by making the control update logic more robust. I also improved data consistency by ensuring the subject is always saved and loaded by its value (e.g., "english") rather than its display text. -->
 // --- Firebase and Gemini Initialization ---
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.9.0/firebase-app.js";
 import { getAI, getGenerativeModel } from "https://www.gstatic.com/firebasejs/11.9.0/firebase-ai.js";
@@ -1798,7 +1797,7 @@ function updateDynamicControls() {
     
     let templateKey = subject;
     if (subject === 'english') {
-        const skill = skillSelect.value;
+        const skill = skillSelect.value || 'vocabulary'; // FIX: Add fallback
         templateKey = `english_${skill}`;
         skillSelectContainer.classList.remove('hidden');
         levelSelectContainer.classList.remove('hidden');
@@ -1920,7 +1919,7 @@ async function startLearningSession() {
                     userId: currentUser.uid,
                     userName: currentUser.displayName,
                     topic: topic,
-                    subject: subjectSelect.options[subjectSelect.selectedIndex].text,
+                    subject: subjectSelect.value, // FIX: Save value instead of text
                     pathMarkdown: responseText,
                     completedPrompts: [],
                     lessonCache: {},
@@ -2141,13 +2140,20 @@ async function renderLearningPathHistory() {
             const totalLessons = (data.pathMarkdown.match(/\[([^\]]+?)\]\{"prompt":"([^"]+?)"\}/g) || []).length;
             const completedCount = data.completedPrompts ? data.completedPrompts.length : 0;
             const progress = totalLessons > 0 ? (completedCount / totalLessons) * 100 : 0;
+            
+            const subjectMap = {
+                "general": "Môn học chung",
+                "english": "Tiếng Anh",
+                "mathematics": "Toán"
+            };
+            const subjectText = subjectMap[data.subject] || data.subject;
 
             const card = document.createElement('div');
             card.className = 'card p-4 flex flex-col justify-between';
             card.innerHTML = `
                 <div>
                     <p class="font-bold text-lg text-gray-800 dark:text-gray-200">${data.topic}</p>
-                    <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">${data.subject}</p>
+                    <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">${subjectText}</p>
                 </div>
                 <div class="mt-4">
                      <div class="flex justify-between text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">
@@ -2191,9 +2197,16 @@ async function resumeLearningPath(pathId) {
             learningCache = data.lessonCache || {};
             completedTopics = data.completedPrompts || [];
 
+            const subjectMap = {
+                "general": "Môn học chung",
+                "english": "Tiếng Anh",
+                "mathematics": "Toán"
+            };
+            const subjectText = subjectMap[data.subject] || data.subject;
+
             switchView('learning');
             learningPathTitle.textContent = `Lộ trình học: ${data.topic}`;
-            learningPathSubject.textContent = data.subject;
+            learningPathSubject.textContent = subjectText;
             renderLearningPath(data.pathMarkdown);
 
         } else {
