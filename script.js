@@ -637,6 +637,92 @@ function displayWritingFeedback(data) {
     lucide.createIcons();
 }
 
+// =================================================================
+// START: CODE FIX - ADDED MISSING FUNCTIONS
+// =================================================================
+async function handleWritingReinforcement() {
+    if (!lastWritingFeedback || !lastWritingFeedback.detailedFeedback || lastWritingFeedback.detailedFeedback.length === 0) {
+        showModalAlert("Không có lỗi cụ thể nào được tìm thấy để tạo bài học củng cố.");
+        return;
+    }
+
+    lessonModal.classList.add('active');
+    lessonTitle.textContent = "Bài học Củng cố Kiến thức";
+    lessonContent.innerHTML = '<div class="spinner mx-auto"></div>';
+
+    // Create a prompt based on the mistakes
+    const mistakesSummary = lastWritingFeedback.detailedFeedback.map(fb => 
+        `- Lỗi ${fb.type}: "${fb.mistake}" (Sửa thành: "${fb.correction}"). Giải thích: ${fb.explanation}`
+    ).join('\n');
+
+    const prompt = `Bạn là một gia sư AI. Dựa trên những lỗi sai sau đây của một học sinh, hãy tạo ra một bài học ngắn gọn (bằng tiếng Việt) để giúp họ hiểu rõ hơn. Giải thích khái niệm, cho thêm 2-3 ví dụ, và tạo một câu hỏi trắc nghiệm nhỏ để kiểm tra.
+    
+    Các lỗi cần giải thích:
+    ${mistakesSummary}
+    
+    Hãy trình bày bài học một cách rõ ràng, sử dụng Markdown.`;
+
+    try {
+        const result = await model.generateContent(prompt);
+        const response = await result.response;
+        const lessonHtml = marked.parse(response.text());
+
+        lessonContent.innerHTML = `<div class="prose dark:prose-invert max-w-none">${lessonHtml}</div>`;
+        renderMath(lessonContent);
+
+    } catch (error) {
+        console.error("Lỗi khi yêu cầu củng cố bài viết:", error);
+        lessonContent.innerHTML = `<p class="text-red-500">Lỗi: Không thể tạo bài học củng cố.</p>`;
+    }
+}
+
+async function handleWritingExpansion() {
+    if (!lastWritingFeedback || !lastWritingFeedback.correctedTextHTML) {
+        showModalAlert("Không có bài viết đã sửa để thực hiện nâng cao.");
+        return;
+    }
+
+    lessonModal.classList.add('active');
+    lessonTitle.textContent = "Gợi ý Nâng cao Bài viết";
+    lessonContent.innerHTML = '<div class="spinner mx-auto"></div>';
+
+    const originalText = writingInput.value;
+    // Remove <del> and <ins> tags to get the clean corrected text
+    const correctedText = lastWritingFeedback.correctedTextHTML.replace(/<\/?del>|<\/?ins>/g, ''); 
+
+    const prompt = `Bạn là một chuyên gia đánh giá bài viết tiếng Anh. Một học sinh đã viết bài sau:
+    ---
+    ${originalText}
+    ---
+    Đây là phiên bản đã được sửa lỗi ngữ pháp cơ bản:
+    ---
+    ${correctedText}
+    ---
+    Dựa trên phiên bản đã sửa, hãy đưa ra các gợi ý (bằng tiếng Việt) để nâng cao bài viết này. Tập trung vào:
+    1.  **Từ vựng (Vocabulary):** Gợi ý 3-5 từ/cụm từ đồng nghĩa hoặc cao cấp hơn để thay thế.
+    2.  **Cấu trúc câu (Sentence Structure):** Gợi ý 1-2 cách để viết lại các câu đơn thành câu phức hoặc câu ghép cho hay hơn.
+    3.  **Phát triển ý (Idea Development):** Gợi ý một ý tưởng để làm cho bài viết sâu sắc hơn.
+    
+    Hãy trình bày các gợi ý một cách rõ ràng bằng Markdown.`;
+
+    try {
+        const result = await model.generateContent(prompt);
+        const response = await result.response;
+        const suggestionHtml = marked.parse(response.text());
+
+        lessonContent.innerHTML = `<div class="prose dark:prose-invert max-w-none">${suggestionHtml}</div>`;
+        renderMath(lessonContent);
+
+    } catch (error) {
+        console.error("Lỗi khi yêu cầu nâng cao bài viết:", error);
+        lessonContent.innerHTML = `<p class="text-red-500">Lỗi: Không thể tạo gợi ý nâng cao.</p>`;
+    }
+}
+// =================================================================
+// END: CODE FIX
+// =================================================================
+
+
 // --- CONVERSATION FEATURE ---
 async function startConversationPractice() {
     if (!model) { updateStatus('error', "Mô hình AI chưa được khởi tạo."); return; }
@@ -2018,8 +2104,8 @@ async function fetchAndDisplayLesson(prompt, buttonElement) {
         2.  **Cấu trúc rõ ràng:** Sử dụng các tiêu đề phụ (\`##\`, \`###\`) để chia nhỏ các phần như "Định nghĩa", "Cách dùng", "Cấu trúc", "Ví dụ".
         3.  **Làm nổi bật:** Khi liệt kê các mục, hãy **in đậm** thuật ngữ chính ở đầu mỗi mục (ví dụ: \`- **Chủ ngữ (Subject):** Là...\`).
         4.  **Các khối nổi bật (Callout Boxes) - RẤT QUAN TRỌNG:**
-            *   **Ví dụ:** Đặt TẤT CẢ các câu ví dụ trong khối trích dẫn Markdown và LUÔN BẮT ĐẦU bằng \`> **Ví dụ:** \` (ví dụ: \`> **Ví dụ:** She reads a book.\`).
-            *   **Lưu ý/Mẹo quan trọng:** Các lưu ý hoặc mẹo quan trọng nên được đặt trong khối trích dẫn Markdown và LUÔN BẮT ĐẦU bằng \`> **Lưu ý:** \` hoặc \`> **Mẹo:** \` (ví dụ: \`> **Lưu ý:** Đối với ngôi thứ ba số ít...\`).
+            * **Ví dụ:** Đặt TẤT CẢ các câu ví dụ trong khối trích dẫn Markdown và LUÔN BẮT ĐẦU bằng \`> **Ví dụ:** \` (ví dụ: \`> **Ví dụ:** She reads a book.\`).
+            * **Lưu ý/Mẹo quan trọng:** Các lưu ý hoặc mẹo quan trọng nên được đặt trong khối trích dẫn Markdown và LUÔN BẮT ĐẦU bằng \`> **Lưu ý:** \` hoặc \`> **Mẹo:** \` (ví dụ: \`> **Lưu ý:** Đối với ngôi thứ ba số ít...\`).
         5.  **Ngôn ngữ:** Giảng bài hoàn toàn bằng tiếng Việt.
         6.  **Công thức toán học:** Luôn sử dụng định dạng KaTeX cho các công thức (\`$\` cho inline, \`$$\` cho block).
 
@@ -2224,7 +2310,7 @@ learningContent.addEventListener('click', (e) => {
     }
 });
 
-// --- SCROLL TO TOP LOGIC I---
+// --- SCROLL TO TOP LOGIC ---
 window.addEventListener('scroll', () => {
     if (window.scrollY > 400) {
         scrollToTopBtn.classList.add('visible');
