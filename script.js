@@ -2,7 +2,7 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.9.0/firebase-app.js";
 import { getAI, getGenerativeModel } from "https://www.gstatic.com/firebasejs/11.9.0/firebase-ai.js";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.9.0/firebase-auth.js";
-import { getFirestore, collection, addDoc, query, where, getDocs, orderBy, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.9.0/firebase-firestore.js";
+import { getFirestore, collection, addDoc, query, where, getDocs, orderBy, serverTimestamp, doc, getDoc } from "https://www.gstatic.com/firebasejs/11.9.0/firebase-firestore.js";
 
 // Your web app's Firebase configuration
 const firebaseConfig = {
@@ -44,16 +44,16 @@ const historyLoadingSpinner = document.getElementById('history-loading-spinner')
 
 const practiceTab = document.getElementById('practice-tab');
 const interactiveTab = document.getElementById('interactive-tab');
-const learningPathTab = document.getElementById('learning-path-tab'); // NEW
+const learningPathTab = document.getElementById('learning-path-tab');
 const practiceHistoryContent = document.getElementById('practice-history-content');
 const interactiveHistoryContent = document.getElementById('interactive-history-content');
-const learningPathHistoryContent = document.getElementById('learning-path-history-content'); // NEW
+const learningPathHistoryContent = document.getElementById('learning-path-history-content');
 const practiceHistoryList = document.getElementById('practice-history-list');
 const interactiveHistoryList = document.getElementById('interactive-history-list');
-const learningPathHistoryList = document.getElementById('learning-path-history-list'); // NEW
+const learningPathHistoryList = document.getElementById('learning-path-history-list');
 const noPracticeHistory = document.getElementById('no-practice-history');
 const noInteractiveHistory = document.getElementById('no-interactive-history');
-const noLearningPathHistory = document.getElementById('no-learning-path-history'); // NEW
+const noLearningPathHistory = document.getElementById('no-learning-path-history');
 
 const lessonModal = document.getElementById('lesson-modal');
 const lessonTitle = document.getElementById('lesson-title');
@@ -126,7 +126,7 @@ const learningPathTitle = document.getElementById('learning-path-title');
 const learningPathSubject = document.getElementById('learning-path-subject');
 const learningContent = document.getElementById('learning-content');
 const changeSettingsFromLearningBtn = document.getElementById('change-settings-from-learning-btn');
-const regenerateLearningPathBtn = document.getElementById('regenerate-learning-path-btn'); // NEW
+const regenerateLearningPathBtn = document.getElementById('regenerate-learning-path-btn');
 
 // Summary View Elements
 const summaryText = document.getElementById('summary-text');
@@ -1197,7 +1197,7 @@ function renderLearningFillInTheBlank(args) {
 
     let sentenceHtml = DOMPurify.sanitize(args.sentence);
     const numBlanks = (sentenceHtml.match(/\{\{BLANK\}\}/g) || []).length;
-    const renderInput = `<input type="text" class="quiz-blank-input inline-block w-32 mx-2 p-2 rounded-md dark:bg-gray-700" placeholder="...">`;
+    const renderInput = `<input type="text" class="input-fib inline-block w-48 mx-2" placeholder="...">`;
     sentenceHtml = sentenceHtml.replace(/\{\{BLANK\}\}/g, renderInput);
     
     quizWrapper.innerHTML = `
@@ -1744,7 +1744,7 @@ async function saveTestResult() {
     }
 }
 
-// NEW: Hàm lưu lộ trình học vào Firestore và localStorage
+// Hàm lưu lộ trình học vào Firestore và localStorage
 async function saveLearningPath(topic, pathContent) {
     if (!currentUser) {
         console.log("Người dùng chưa đăng nhập, không thể lưu lộ trình.");
@@ -1858,7 +1858,7 @@ async function renderHistory() {
                         <p class="text-xs text-gray-400 dark:text-gray-500 mt-1">${date}</p>
                     </div>
                     <div class="text-right">
-                        <button class="btn btn-secondary view-path-btn" data-topic="${data.topic}" data-content='${data.pathContent}'>Xem lại</button>
+                        <button class="btn btn-secondary view-path-btn" data-doc-id="${doc.id}" data-topic="${data.topic}">Xem lại</button>
                     </div>
                 </div>
             `;
@@ -1880,189 +1880,45 @@ async function renderHistory() {
     }
 }
 
-// --- HELPERS & INITIALIZATION ---
-function updateStatus(type, message) { const colors = { 'success': 'text-green-600 dark:text-green-400', 'error': 'text-red-600 dark:text-red-400', 'info': 'text-gray-600 dark:text-gray-400' }; statusMessage.textContent = message; statusMessage.className = `mt-6 text-center font-semibold ${colors[type] || 'text-gray-600 dark:text-gray-400'}`; }
-function setLoadingState(isLoading) { generateButton.disabled = isLoading; const icon = generateButton.querySelector('i'); if(icon) icon.classList.toggle('hidden', isLoading); buttonText.classList.toggle('hidden', isLoading); buttonSpinner.classList.toggle('hidden', !isLoading); if (isLoading) updateStatus('info', 'AI đang làm việc, vui lòng chờ trong giây lát...'); }
-
-function updateDynamicControls() {
-    const subject = subjectSelect.value;
-    const mode = modeSelect.value;
-
-    skillSelectContainer.classList.add('hidden');
-    levelSelectContainer.classList.add('hidden');
-    mathLevelSelectContainer.classList.add('hidden');
-    
-    let templateKey = subject;
-    if (subject === 'english') {
-        const skill = skillSelect.value;
-        templateKey = `english_${skill}`;
-        skillSelectContainer.classList.remove('hidden');
-        levelSelectContainer.classList.remove('hidden');
-    } else if (subject === 'mathematics') {
-        templateKey = 'mathematics';
-        mathLevelSelectContainer.classList.remove('hidden');
-    }
-
-    dynamicControlsContainer.innerHTML = controlTemplates[templateKey] || controlTemplates.general;
-
-    if (mode === 'learning') {
-        const fieldset = dynamicControlsContainer.querySelector('fieldset');
-        if (fieldset) fieldset.classList.add('hidden');
-        const topicInput = document.getElementById('topicInput');
-        if(topicInput && topicInput.tagName === 'TEXTAREA') {
-            topicInput.placeholder = "Nhập chủ đề bạn muốn học, ví dụ: 'Lịch sử máy tính', 'Các thì trong Tiếng Anh'...";
-        }
-    }
-
-    lucide.createIcons();
-}
-
-// --- AUDIO PLAYBACK LOGIC ---
-function playSpeech(text) {
-    if (synth.speaking) {
-        synth.cancel();
-    }
-    audioState.isPaused = false;
-    
-    const utterance = new SpeechSynthesisUtterance(text);
-    const voices = synth.getVoices();
-    let selectedVoice = voices.find(voice => voice.name === 'Google US English' || voice.name === 'Microsoft David - English (United States)');
-    if (!selectedVoice) {
-        selectedVoice = voices.find(voice => voice.lang.startsWith('en-')) || voices[0];
-    }
-    utterance.voice = selectedVoice;
-    utterance.rate = 0.9;
-    
-    utterance.onstart = () => {
-        playAudioBtn.innerHTML = `<i data-lucide="pause" class="w-6 h-6"></i>`;
-        lucide.createIcons();
-        audioStatus.textContent = "Đang phát...";
-    };
-    
-    utterance.onend = () => {
-        if (!audioState.isPaused) {
-            playAudioBtn.innerHTML = `<i data-lucide="play" class="w-6 h-6"></i>`;
-            lucide.createIcons();
-            audioStatus.textContent = "Nghe lại";
-        }
-    };
-    
-    audioState.utterance = utterance;
-    synth.speak(utterance);
-}
-
-function setupAudioPlayer() {
-    playAudioBtn.innerHTML = `<i data-lucide="play" class="w-6 h-6"></i>`;
-    lucide.createIcons();
-    audioStatus.textContent = "Nhấn để nghe";
-    
-    playAudioBtn.onclick = () => {
-        if (synth.speaking && !synth.paused) {
-            synth.pause();
-            audioState.isPaused = true;
-            playAudioBtn.innerHTML = `<i data-lucide="play" class="w-6 h-6"></i>`;
-            lucide.createIcons();
-            audioStatus.textContent = "Đã tạm dừng";
-        } else if (synth.paused) {
-            synth.resume();
-            audioState.isPaused = false;
-            playAudioBtn.innerHTML = `<i data-lucide="pause" class="w-6 h-6"></i>`;
-            lucide.createIcons();
-            audioStatus.textContent = "Đang phát...";
-        } else {
-            playSpeech(currentQuizData.raw.script);
-        }
-    };
-}
-
-// --- LEARNING MODE FUNCTIONS ---
-// Cập nhật hàm startLearningSession để tích hợp caching
-async function startLearningSession() {
-    if (!model) { updateStatus('error', "Mô hình AI chưa được khởi tạo."); return; }
-    setLoadingState(true);
-    resetQuizState();
-
-    const topic = document.getElementById('topicInput').value.trim();
-    if (!topic) {
-        showError("Vui lòng nhập chủ đề bạn muốn học.");
-        setLoadingState(false);
+// NEW: Hàm để tải và hiển thị lộ trình học từ Firestore
+async function loadAndDisplayLearningPath(docId, topic) {
+    if (!currentUser || !docId) {
+        showError("Không thể tải lộ trình học. Vui lòng đăng nhập.");
         return;
     }
-
-    // 1. Kiểm tra localStorage trước
-    let cachedPathContent = null;
-    if (currentUser) {
-        const cacheKey = `learningPath_${currentUser.uid}_${topic}`;
-        cachedPathContent = localStorage.getItem(cacheKey);
-    }
     
-    if (cachedPathContent) {
-        renderLearningPath(cachedPathContent);
-        setLoadingState(false);
-        updateStatus('success', 'Đã tải lộ trình học từ bộ nhớ đệm!');
-        switchView('learning');
-        return;
-    }
-
-    // Nếu không có trong cache, kiểm tra Firestore (nếu người dùng đã đăng nhập)
-    if (currentUser) {
-        try {
-            const q = query(collection(db, "learningPaths"), where("userId", "==", currentUser.uid), where("topic", "==", topic));
-            const querySnapshot = await getDocs(q);
-            if (!querySnapshot.empty) {
-                const pathData = querySnapshot.docs[0].data().pathContent;
-                localStorage.setItem(`learningPath_${currentUser.uid}_${topic}`, pathData);
-                renderLearningPath(pathData);
-                setLoadingState(false);
-                updateStatus('success', 'Đã tải lộ trình học từ Firestore!');
-                switchView('learning');
-                return;
-            }
-        } catch (error) {
-            console.error("Lỗi khi tải lộ trình từ Firestore:", error);
-            // Tiếp tục sang bước tạo mới nếu có lỗi
-        }
-    }
+    const docRef = doc(db, "learningPaths", docId);
     
-    // Cập nhật giao diện tải...
-    learningPathTitle.textContent = `Lộ trình học: ${topic}`;
-    learningPathSubject.textContent = subjectSelect.options[subjectSelect.selectedIndex].text;
+    // Hiển thị giao diện tải
     switchView('learning');
-    const loadingMessage = "AI đang tạo lộ trình học, vui lòng chờ...";
+    learningPathTitle.textContent = `Lộ trình học: ${topic}`;
+    learningPathSubject.textContent = "Đang tải...";
     learningContent.innerHTML = `
         <div class="text-center p-6 card">
             <div class="spinner h-8 w-8 mx-auto mb-4"></div>
-            <p class="font-semibold text-lg"><span id="loading-typing-text"></span></p>
+            <p class="font-semibold text-lg">Đang tải lộ trình học...</p>
         </div>
     `;
-    animateTyping('loading-typing-text', loadingMessage, 70);
 
-    // 2. Gọi AI để tạo mới
     try {
-        const prompt = `Bạn là một người hướng dẫn học tập chuyên nghiệp, có khả năng chia nhỏ các chủ đề phức tạp thành một lộ trình học tập rõ ràng.
-        Khi người dùng yêu cầu một chủ đề, hãy trả lời bằng một danh sách các bài học có cấu trúc (dùng Markdown với gạch đầu dòng).
-        Đối với MỖI BÀI HỌC trong lộ trình, bạn PHẢI định dạng nó theo cú pháp đặc biệt sau: \`[Tên bài học]{"prompt":"Yêu cầu chi tiết để bạn giảng giải về bài học này"}\`. Prompt phải chi tiết và bằng tiếng Việt.
-        Yêu cầu của người dùng: Tạo một lộ trình học chi tiết cho chủ đề "${topic}".`;
-        const result = await model.generateContent(prompt);
-        const responseText = result.response.text();
-        
-        // 3. Sau khi AI tạo xong, lưu lại và hiển thị
-        await saveLearningPath(topic, responseText);
-        renderLearningPath(responseText);
-
-    } catch (error) {
-        console.error("Lỗi khi tạo lộ trình học:", error);
-        learningContent.innerHTML = `<p class="text-red-500">Đã có lỗi xảy ra khi tạo lộ trình học. Vui lòng thử lại.</p>`;
-    } finally {
-        setLoadingState(false);
+        const docSnap = await getDoc(docRef);
+        if (docSnap.exists()) {
+            const pathContent = docSnap.data().pathContent;
+            renderLearningPath(pathContent);
+            learningPathSubject.textContent = "Đã tải từ lịch sử";
+        } else {
+            showError("Không tìm thấy lộ trình học.");
+        }
+    } catch (e) {
+        console.error("Lỗi khi tải tài liệu:", e);
+        showError("Lỗi khi tải lộ trình học từ Firestore.");
     }
 }
 
-// NEW: Hàm render một lộ trình học đã lưu
+// Cập nhật hàm renderSavedLearningPath đã cũ
 function renderSavedLearningPath(topic, content) {
     switchView('learning');
     learningPathTitle.textContent = `Lộ trình học: ${topic}`;
-    // Có thể cần thêm logic để xác định môn học nếu muốn
     learningPathSubject.textContent = "Đã tải từ lịch sử";
     renderLearningPath(content);
 }
@@ -2345,13 +2201,14 @@ learningPathTab.addEventListener('click', () => {
 learningPathHistoryList.addEventListener('click', (e) => {
     const viewBtn = e.target.closest('.view-path-btn');
     if (viewBtn) {
+        const docId = viewBtn.dataset.docId;
         const topic = viewBtn.dataset.topic;
-        const pathContent = viewBtn.dataset.content;
         
         const modeBtn = document.getElementById('mode-learning-btn');
         if(modeBtn) modeBtn.click();
         
-        renderSavedLearningPath(topic, pathContent);
+        // Gọi hàm mới để tải và hiển thị lộ trình
+        loadAndDisplayLearningPath(docId, topic);
     }
 });
 
