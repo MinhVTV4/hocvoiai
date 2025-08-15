@@ -2130,12 +2130,12 @@ async function startLearningSession() {
 
         completedTopics = existingData?.completedPrompts || [];
         openLessons = existingData?.openLessonPrompts || [];
-        learningCache = existingData?.lessonContents || {}; // Load cached content
+        learningCache = existingData?.lessonContents || {};
 
         if (existingData?.learningPathContent) {
             renderLearningPath(existingData.learningPathContent);
         } else {
-            const prompt = `Bạn là một người hướng dẫn học tập chuyên nghiệp...`; // The prompt is long, keeping it short for brevity
+            const prompt = LEARNING_MODE_SYSTEM_PROMPT + `\nYêu cầu của người dùng: Tạo một lộ trình học chi tiết cho chủ đề "${topic}".`;
             
             const result = await model.generateContent(prompt);
             const responseText = result.response.text();
@@ -2189,7 +2189,7 @@ function renderLearningPath(text) {
             openLessons.forEach(prompt => {
                 const button = learningContent.querySelector(`.learning-link[data-prompt="${prompt}"]`);
                 if (button) {
-                    fetchAndDisplayLesson(prompt, button, false);
+                    fetchAndDisplayLesson(prompt, button);
                 }
             });
         }, 100);
@@ -2199,7 +2199,7 @@ function renderLearningPath(text) {
     renderMath(learningContent);
 }
 
-async function fetchAndDisplayLesson(prompt, buttonElement, collapseOthers = true) {
+async function fetchAndDisplayLesson(prompt, buttonElement) {
     const lessonContainerId = `lesson-${prompt.replace(/[^a-zA-Z0-9]/g, '')}`;
     let lessonContainer = document.getElementById(lessonContainerId);
 
@@ -2209,7 +2209,6 @@ async function fetchAndDisplayLesson(prompt, buttonElement, collapseOthers = tru
         return;
     }
     
-    // OPTIMIZED: Check cache first
     if (learningCache[prompt]) {
         renderLessonContent(learningCache[prompt], prompt, buttonElement);
         return;
@@ -2219,16 +2218,6 @@ async function fetchAndDisplayLesson(prompt, buttonElement, collapseOthers = tru
     const iconSpan = buttonElement.querySelector('.icon');
     if (iconSpan) iconSpan.innerHTML = '<div class="spinner w-5 h-5"></div>';
     
-    if (collapseOthers) {
-        learningContent.querySelectorAll('.learning-item:not(.collapsed)').forEach(item => {
-            if (item.id !== `lesson-path`) {
-                item.classList.add('collapsed');
-            }
-        });
-        openLessons = [prompt];
-        saveOrUpdateLearningProgress({ openLessonPrompts: openLessons });
-    }
-
     lessonContainer = document.createElement('div');
     lessonContainer.id = lessonContainerId;
     lessonContainer.className = 'learning-item fade-in';
@@ -2238,12 +2227,22 @@ async function fetchAndDisplayLesson(prompt, buttonElement, collapseOthers = tru
     lessonContainer.scrollIntoView({ behavior: 'smooth', block: 'center' });
 
     try {
-        const fullPrompt = `Bạn là một gia sư AI chuyên nghiệp...`; // The prompt is long, keeping it short for brevity
+             const fullPrompt = `Bạn là một gia sư AI chuyên nghiệp. Hãy tạo một bài giảng chi tiết và có cấu trúc rõ ràng cho yêu cầu sau.
+        QUY TẮC TRÌNH BÀY (RẤT QUAN TRỌNG):
+        1.  **Tiêu đề chính:** Bắt đầu bằng một tiêu đề chính (ví dụ: \`# Giới thiệu về Thì Hiện tại Đơn\`).
+        2.  **Cấu trúc rõ ràng:** Sử dụng các tiêu đề phụ (\`##\`, \`###\`) để chia nhỏ các phần như "Định nghĩa", "Cách dùng", "Cấu trúc", "Ví dụ".
+        3.  **Làm nổi bật:** Khi liệt kê các mục, hãy **in đậm** thuật ngữ chính ở đầu mỗi mục (ví dụ: \`- **Chủ ngữ (Subject):** Là...\`).
+        4.  **Các khối nổi bật (Callout Boxes) - RẤT QUAN TRỌNG:**
+            * **Ví dụ:** Đặt TẤT CẢ các câu ví dụ trong khối trích dẫn Markdown và LUÔN BẮT ĐẦU bằng \`> **Ví dụ:** \` (ví dụ: \`> **Ví dụ:** She reads a book.\`).
+            * **Lưu ý/Mẹo quan trọng:** Các lưu ý hoặc mẹo quan trọng nên được đặt trong khối trích dẫn Markdown và LUÔN BẮT ĐẦU bằng \`> **Lưu ý:** \` hoặc \`> **Mẹo:** \` (ví dụ: \`> **Lưu ý:** Đối với ngôi thứ ba số ít...\`).
+        5.  **Ngôn ngữ:** Giảng bài hoàn toàn bằng tiếng Việt.
+        6.  **Công thức toán học:** Luôn sử dụng định dạng KaTeX cho các công thức (\`$\` cho inline, \`$$\` cho block).
+
+        YÊU CẦU CỦA HỌC VIÊN: "${prompt}"`;
         
         const result = await model.generateContent(fullPrompt);
         const responseText = result.response.text();
         
-        // OPTIMIZED: Update cache and save to Firestore
         learningCache[prompt] = responseText;
         await saveOrUpdateLearningProgress({ lessonContents: learningCache });
         
@@ -2439,18 +2438,19 @@ learningContent.addEventListener('click', (e) => {
         e.preventDefault();
         const lessonItem = titleToggle.closest('.learning-item');
         if (lessonItem) {
-            const wasCollapsed = lessonItem.classList.contains('collapsed');
-            lessonItem.classList.toggle('collapsed');
-            
             const prompt = lessonItem.dataset.prompt;
-            if (prompt) {
-                if (wasCollapsed) {
-                    if (!openLessons.includes(prompt)) openLessons.push(prompt);
-                } else {
-                    openLessons = openLessons.filter(p => p !== prompt);
+            if (!prompt) return;
+
+            const isNowCollapsed = lessonItem.classList.toggle('collapsed');
+            
+            if (isNowCollapsed) {
+                openLessons = openLessons.filter(p => p !== prompt);
+            } else {
+                if (!openLessons.includes(prompt)) {
+                    openLessons.push(prompt);
                 }
-                saveOrUpdateLearningProgress({ openLessonPrompts: openLessons });
             }
+            saveOrUpdateLearningProgress({ openLessonPrompts: openLessons });
         }
     }
 });
