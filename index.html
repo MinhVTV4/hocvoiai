@@ -229,13 +229,12 @@
         <!-- LEARNING VIEW -->
         <div id="learning-view" class="hidden">
             <div class="max-w-4xl mx-auto">
-                <div class="card p-6 md:p-8 mb-6 flex justify-between items-center flex-wrap gap-4">
-                    <div>
-                        <h2 id="learning-path-title" class="text-2xl font-bold text-gray-800 dark:text-white">Lộ trình học</h2>
-                        <p id="learning-path-subject" class="text-sm text-gray-500 dark:text-gray-400 mt-1"></p>
-                    </div>
-                    <div class="flex gap-2">
-                        <button id="regenerate-learning-path-btn" class="btn btn-secondary"><i data-lucide="refresh-cw" class="w-5 h-5 mr-2 inline-block"></i>Tạo lại lộ trình</button>
+                <div class="card p-6 md:p-8 mb-6">
+                    <div class="flex justify-between items-center">
+                        <div>
+                            <h2 id="learning-path-title" class="text-2xl font-bold text-gray-800 dark:text-white">Lộ trình học tập</h2>
+                            <p id="learning-path-subject" class="text-sm text-gray-500 dark:text-gray-400 mt-1"></p>
+                        </div>
                         <button id="change-settings-from-learning-btn" class="btn btn-secondary"><i data-lucide="sliders-horizontal" class="w-5 h-5 mr-2 inline-block"></i>Đổi cài đặt</button>
                     </div>
                 </div>
@@ -272,9 +271,8 @@
                 <!-- Tabs for history -->
                 <div class="border-b border-gray-200 dark:border-gray-700">
                     <nav class="-mb-px flex space-x-6" aria-label="Tabs">
-                        <button id="practice-tab" class="tab-btn whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-200 dark:hover:border-gray-600">Luyện tập</button>
+                        <button id="practice-tab" class="tab-btn active whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm">Luyện tập</button>
                         <button id="interactive-tab" class="tab-btn whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-200 dark:hover:border-gray-600">Tương tác</button>
-                        <button id="learning-path-tab" class="tab-btn active whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm">Lộ trình học</button>
                     </nav>
                 </div>
 
@@ -284,7 +282,7 @@
                 </div>
 
                 <!-- Practice History Content -->
-                <div id="practice-history-content" class="hidden">
+                <div id="practice-history-content">
                     <div id="practice-history-list" class="space-y-4 mt-6"></div>
                     <div id="no-practice-history" class="text-center py-10 text-gray-500 hidden">
                         <i data-lucide="archive-x" class="w-12 h-12 mx-auto mb-2"></i>
@@ -300,16 +298,6 @@
                         <p>Chưa có lịch sử tương tác nào.</p>
                     </div>
                 </div>
-
-                <!-- NEW: Learning Path History Content -->
-                <div id="learning-path-history-content">
-                    <div id="learning-path-history-list" class="space-y-4 mt-6"></div>
-                    <div id="no-learning-path-history" class="text-center py-10 text-gray-500 hidden">
-                        <i data-lucide="route" class="w-12 h-12 mx-auto mb-2"></i>
-                        <p>Chưa có lộ trình học nào được lưu.</p>
-                    </div>
-                </div>
-
             </div>
         </div>
 
