@@ -1,4 +1,4 @@
-// --- Firebase and Gemini Initialization ---
+ --- Firebase and Gemini Initialization ---
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.9.0/firebase-app.js";
 import { getAI, getGenerativeModel } from "https://www.gstatic.com/firebasejs/11.9.0/firebase-ai.js";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.9.0/firebase-auth.js";
@@ -301,13 +301,22 @@ function switchView(view) {
     if (view === 'learning') learningView.classList.remove('hidden');
 }
 
-function resetQuizState() {
-    allQuestions = [];
-    currentQuizData = {}; 
+// FIX: Separated state resets for different contexts
+function resetSessionState() {
     currentQuestionIndex = 0;
     score = 0;
-    generatedExercisesCache = [];
     sessionResults = [];
+    paperScore.classList.add('hidden');
+    if (practiceActionsContainer) practiceActionsContainer.classList.add('hidden');
+    if (checkAllAnswersButton) checkAllAnswersButton.style.display = 'block';
+    summarySaveStatus.textContent = '';
+}
+
+function resetQuizState() {
+    resetSessionState();
+    allQuestions = [];
+    currentQuizData = {}; 
+    generatedExercisesCache = [];
     conversationHistory = [];
     completedTopics = [];
     openLessons = [];
@@ -321,10 +330,6 @@ function resetQuizState() {
     interactiveFooter.innerHTML = '';
     document.getElementById('interactive-passage-host').innerHTML = '';
     learningContent.innerHTML = '';
-    paperScore.classList.add('hidden');
-    if (practiceActionsContainer) practiceActionsContainer.classList.add('hidden');
-    if (checkAllAnswersButton) checkAllAnswersButton.style.display = 'block';
-    summarySaveStatus.textContent = '';
     conversationLog.innerHTML = '';
 }
 
@@ -1498,6 +1503,8 @@ function displayCurrentInteractiveQuestion() {
         const questionNumber = currentQuestionIndex + 1;
         const element = renderFunction(args, questionNumber);
         interactiveQuestionHost.appendChild(element);
+        // UX Improvement: Scroll to the new question
+        element.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
 
     const checkButton = document.createElement('button');
@@ -1786,34 +1793,48 @@ function checkAllPracticeAnswers() {
 
 
 // --- Drag & Drop ---
+// FIX: Scoped Drag & Drop logic to each question
 function addDragDropHandlers(list) {
     let draggingItem = null;
+    const questionItem = list.closest('.question-item');
+
     list.querySelectorAll('.sortable-item').forEach(item => {
-        item.addEventListener('dragstart', (e) => { 
+        item.addEventListener('dragstart', () => { 
             draggingItem = item;
+            questionItem.classList.add('dragging-active');
             setTimeout(() => item.classList.add('opacity-50'), 0); 
         });
         item.addEventListener('dragend', () => { 
             item.classList.remove('opacity-50');
             draggingItem = null;
+            questionItem.classList.remove('dragging-active');
         });
     });
+
     list.addEventListener('dragover', e => {
+        if (!questionItem.classList.contains('dragging-active')) return;
         e.preventDefault();
         const afterElement = getDragAfterElement(list, e.clientY);
         if (draggingItem) {
-            if (afterElement == null) { list.appendChild(draggingItem); } 
-            else { list.insertBefore(draggingItem, afterElement); }
+            if (afterElement == null) { 
+                list.appendChild(draggingItem); 
+            } else { 
+                list.insertBefore(draggingItem, afterElement); 
+            }
         }
     });
 }
+
 function getDragAfterElement(container, y) {
     const draggableElements = [...container.querySelectorAll('.sortable-item:not(.opacity-50)')];
     return draggableElements.reduce((closest, child) => {
         const box = child.getBoundingClientRect();
         const offset = y - box.top - box.height / 2;
-        if (offset < 0 && offset > closest.offset) { return { offset: offset, element: child }; } 
-        else { return closest; }
+        if (offset < 0 && offset > closest.offset) { 
+            return { offset: offset, element: child }; 
+        } else { 
+            return closest; 
+        }
     }, { offset: Number.NEGATIVE_INFINITY }).element;
 }
 
@@ -2360,13 +2381,15 @@ showTranscriptBtn.addEventListener('click', () => {
     showTranscriptBtn.textContent = transcriptContainer.classList.contains('hidden') ? 'Hiện lời thoại' : 'Ẩn lời thoại';
 });
 
+// FIX: "Làm lại" now uses resetSessionState to preserve the questions
 const handleRestart = () => {
      if (generatedExercisesCache.length === 0) {
          showError("Không có bài tập nào để làm lại. Vui lòng tạo bài tập trước.");
          return;
      }
-     resetQuizState();
+     resetSessionState(); // Use the new function here
      
+     // Re-render using the preserved cache
      if (modeSelect.value === 'practice') {
         renderPracticeMode(generatedExercisesCache);
     } else {
@@ -2429,10 +2452,14 @@ learningContent.addEventListener('click', (e) => {
     if (link) {
         e.preventDefault();
         const prompt = link.dataset.prompt;
-        if (!openLessons.includes(prompt)) {
-            openLessons.push(prompt);
-            saveOrUpdateLearningProgress({ openLessonPrompts: openLessons });
-        }
+        // FIX: Correctly manage open lessons state
+        learningContent.querySelectorAll('.learning-item:not(.collapsed)').forEach(item => {
+            if (item.id !== `lesson-path`) {
+                item.classList.add('collapsed');
+            }
+        });
+        openLessons = [prompt]; // Now it correctly sets only the current one as open
+        saveOrUpdateLearningProgress({ openLessonPrompts: openLessons });
         fetchAndDisplayLesson(prompt, link);
     } else if (titleToggle) {
         e.preventDefault();
