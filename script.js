@@ -863,6 +863,83 @@ function displayConversationFeedback(data) {
     lucide.createIcons();
 }
 
+// =================================================================
+// START: CODE FIX 2 - ADDED MISSING CONVERSATION FUNCTIONS
+// =================================================================
+async function handleConversationReinforcement() {
+    if (!lastConversationFeedback || !lastConversationFeedback.areasForImprovement || lastConversationFeedback.areasForImprovement.length === 0) {
+        showModalAlert("Không có lỗi cụ thể nào được tìm thấy để tạo bài học củng cố.");
+        return;
+    }
+
+    // Keep the modal open, but change its content
+    lessonTitle.textContent = "Bài học Củng cố từ Hội thoại";
+    lessonContent.innerHTML = '<div class="spinner mx-auto"></div>';
+
+    const mistakesSummary = lastConversationFeedback.areasForImprovement.map(fb => 
+        `- Lỗi ${fb.type}: Bạn đã nói "${fb.original}", nên sửa thành "${fb.suggestion}". Giải thích: ${fb.explanation}`
+    ).join('\n');
+
+    const prompt = `Bạn là một gia sư AI. Dựa trên những lỗi sai sau đây của một học sinh trong một buổi hội thoại, hãy tạo ra một bài học ngắn gọn (bằng tiếng Việt) để giúp họ hiểu rõ hơn. Với mỗi lỗi, hãy giải thích sâu hơn về quy tắc ngữ pháp hoặc cách dùng từ, cho thêm 1-2 ví dụ khác, và tạo một câu hỏi điền từ nhỏ để họ luyện tập.
+    
+    Các lỗi cần giải thích:
+    ${mistakesSummary}
+    
+    Hãy trình bày bài học một cách rõ ràng, sử dụng Markdown.`;
+
+    try {
+        const result = await model.generateContent(prompt);
+        const response = await result.response;
+        const lessonHtml = marked.parse(response.text());
+
+        lessonContent.innerHTML = `<div class="prose dark:prose-invert max-w-none">${lessonHtml}</div>`;
+        renderMath(lessonContent);
+
+    } catch (error) {
+        console.error("Lỗi khi yêu cầu củng cố hội thoại:", error);
+        lessonContent.innerHTML = `<p class="text-red-500">Lỗi: Không thể tạo bài học củng cố.</p>`;
+    }
+}
+
+async function handleConversationExpansion() {
+    if (!lastConversationFeedback) {
+        showModalAlert("Không có dữ liệu hội thoại để tạo thử thách nâng cao.");
+        return;
+    }
+
+    // Keep the modal open, but change its content
+    lessonTitle.textContent = "Thử thách Nâng cao Hội thoại";
+    lessonContent.innerHTML = '<div class="spinner mx-auto"></div>';
+
+    const strengths = (lastConversationFeedback.strengths || []).join(', ');
+    const topic = currentQuizData.topic;
+
+    const prompt = `Bạn là một gia sư AI. Một học sinh vừa hoàn thành tốt một cuộc hội thoại về chủ đề "${topic}". Điểm mạnh của họ là: ${strengths}.
+    
+    Dựa vào đó, hãy tạo một thử thách nâng cao (bằng tiếng Việt) để giúp họ mở rộng kỹ năng. Gợi ý cho họ:
+    1.  **Từ vựng nâng cao:** 3-5 từ hoặc thành ngữ (idioms) liên quan đến chủ đề "${topic}" mà họ có thể sử dụng.
+    2.  **Câu hỏi đào sâu:** 2-3 câu hỏi phức tạp hơn về chủ đề để khuyến khích họ suy nghĩ và trả lời dài hơn.
+    3.  **Tình huống giả định:** Một tình huống ngắn liên quan đến chủ đề và yêu cầu họ đóng vai.
+    
+    Hãy trình bày các gợi ý một cách rõ ràng và khích lệ, sử dụng Markdown.`;
+
+    try {
+        const result = await model.generateContent(prompt);
+        const response = await result.response;
+        const suggestionHtml = marked.parse(response.text());
+
+        lessonContent.innerHTML = `<div class="prose dark:prose-invert max-w-none">${suggestionHtml}</div>`;
+        renderMath(lessonContent);
+
+    } catch (error) {
+        console.error("Lỗi khi yêu cầu nâng cao hội thoại:", error);
+        lessonContent.innerHTML = `<p class="text-red-500">Lỗi: Không thể tạo thử thách nâng cao.</p>`;
+    }
+}
+// =================================================================
+// END: CODE FIX 2
+// =================================================================
+
 
 async function generateExercises() {
     if (!model) { updateStatus('error', "Mô hình AI chưa được khởi tạo."); return; }
