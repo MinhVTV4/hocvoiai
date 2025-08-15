@@ -1824,7 +1824,6 @@ onAuthStateChanged(auth, user => {
         userInfo.classList.add('flex');
         userAvatar.src = user.photoURL;
         userName.textContent = user.displayName;
-        // NEW: Load recent topics if in learning mode
         if (modeSelect.value === 'learning') {
             loadAndDisplayRecentTopics();
         }
@@ -1833,7 +1832,6 @@ onAuthStateChanged(auth, user => {
         loginContainer.classList.remove('hidden');
         userInfo.classList.add('hidden');
         userInfo.classList.remove('flex');
-        // NEW: Clear recent topics on logout
         const recentTopicsContainer = document.getElementById('recent-topics-container');
         if (recentTopicsContainer) {
             recentTopicsContainer.innerHTML = '';
@@ -1939,13 +1937,12 @@ async function renderHistory() {
 function updateStatus(type, message) { const colors = { 'success': 'text-green-600 dark:text-green-400', 'error': 'text-red-600 dark:text-red-400', 'info': 'text-gray-600 dark:text-gray-400' }; statusMessage.textContent = message; statusMessage.className = `mt-6 text-center font-semibold ${colors[type] || 'text-gray-600 dark:text-gray-400'}`; }
 function setLoadingState(isLoading) { generateButton.disabled = isLoading; const icon = generateButton.querySelector('i'); if(icon) icon.classList.toggle('hidden', isLoading); buttonText.classList.toggle('hidden', isLoading); buttonSpinner.classList.toggle('hidden', !isLoading); if (isLoading) updateStatus('info', 'AI đang làm việc, vui lòng chờ trong giây lát...'); }
 
-// OPTIMIZED: Function to load and display recent learning topics
 async function loadAndDisplayRecentTopics() {
     const container = document.getElementById('recent-topics-container');
     if (!container) return;
 
     if (!currentUser) {
-        container.innerHTML = ''; // Clear if logged out
+        container.innerHTML = '';
         return;
     }
 
@@ -1956,7 +1953,7 @@ async function loadAndDisplayRecentTopics() {
         const querySnapshot = await getDocs(q);
 
         if (querySnapshot.empty) {
-            container.innerHTML = ''; // No history, so show nothing
+            container.innerHTML = '';
             return;
         }
 
@@ -2004,7 +2001,6 @@ function updateDynamicControls() {
             topicInput.placeholder = "Nhập chủ đề bạn muốn học, ví dụ: 'Lịch sử máy tính', 'Các thì trong Tiếng Anh'...";
         }
         
-        // NEW: Add container for recent topics and load them
         const recentTopicsDiv = document.createElement('div');
         recentTopicsDiv.id = 'recent-topics-container';
         recentTopicsDiv.className = 'mt-6';
@@ -2074,45 +2070,29 @@ function setupAudioPlayer() {
 }
 
 // --- LEARNING MODE FUNCTIONS ---
-async function loadLearningProgress(topic) {
-    if (!currentUser) {
-        completedTopics = [];
-        return;
-    }
-    const docId = `${currentUser.uid}_${topic.replace(/\s+/g, '_').toLowerCase()}`;
-    const docRef = doc(db, "userLearningProgress", docId);
-    try {
-        const docSnap = await getDoc(docRef);
-        if (docSnap.exists()) {
-            completedTopics = docSnap.data().completedPrompts || [];
-        } else {
-            completedTopics = [];
-        }
-    } catch (error) {
-        console.error("Error loading learning progress:", error);
-        completedTopics = [];
-    }
-}
-
-async function saveLearningProgress() {
+// OPTIMIZED: Combined save/update function
+async function saveOrUpdateLearningProgress(data) {
     if (!currentUser || !currentLearningTopic) {
         return;
     }
     const docId = `${currentUser.uid}_${currentLearningTopic.replace(/\s+/g, '_').toLowerCase()}`;
     const docRef = doc(db, "userLearningProgress", docId);
+    
     const dataToSave = {
         userId: currentUser.uid,
         userName: currentUser.displayName,
         topic: currentLearningTopic,
-        completedPrompts: completedTopics,
-        lastAccessed: serverTimestamp()
+        lastAccessed: serverTimestamp(),
+        ...data // Spread the incoming data (pathContent or completedPrompts)
     };
+
     try {
         await setDoc(docRef, dataToSave, { merge: true });
     } catch (error) {
         console.error("Error saving learning progress:", error);
     }
 }
+
 
 async function startLearningSession() {
     if (!model) { updateStatus('error', "Mô hình AI chưa được khởi tạo."); return; }
@@ -2128,13 +2108,11 @@ async function startLearningSession() {
     
     currentLearningTopic = topic;
 
-    await loadLearningProgress(topic);
-
     learningPathTitle.textContent = `Lộ trình học: ${topic}`;
     learningPathSubject.textContent = subjectSelect.options[subjectSelect.selectedIndex].text;
     switchView('learning');
     
-    const loadingMessage = "AI đang tạo lộ trình học, vui lòng chờ...";
+    const loadingMessage = "Đang tải hoặc tạo lộ trình học, vui lòng chờ...";
     learningContent.innerHTML = `
         <div class="text-center p-6 card">
             <div class="spinner h-8 w-8 mx-auto mb-4"></div>
@@ -2144,14 +2122,32 @@ async function startLearningSession() {
     animateTyping('loading-typing-text', loadingMessage, 70);
 
     try {
-        const prompt = `Bạn là một người hướng dẫn học tập chuyên nghiệp, có khả năng chia nhỏ các chủ đề phức tạp thành một lộ trình học tập rõ ràng.
-        Khi người dùng yêu cầu một chủ đề, hãy trả lời bằng một danh sách các bài học có cấu trúc (dùng Markdown với gạch đầu dòng).
-        Đối với MỖI BÀI HỌC trong lộ trình, bạn PHẢI định dạng nó theo cú pháp đặc biệt sau: \`[Tên bài học]{"prompt":"Yêu cầu chi tiết để bạn giảng giải về bài học này"}\`. Prompt phải chi tiết và bằng tiếng Việt.
-        Yêu cầu của người dùng: Tạo một lộ trình học chi tiết cho chủ đề "${topic}".`;
-        const result = await model.generateContent(prompt);
-        const response = result.response;
-        const responseText = response.text();
-        renderLearningPath(responseText);
+        // OPTIMIZED: Check for existing path first
+        const docId = `${currentUser.uid}_${topic.replace(/\s+/g, '_').toLowerCase()}`;
+        const docRef = doc(db, "userLearningProgress", docId);
+        const docSnap = await getDoc(docRef);
+        const existingData = docSnap.data();
+
+        completedTopics = existingData?.completedPrompts || [];
+
+        if (existingData?.learningPathContent) {
+            // If path exists, render it directly
+            renderLearningPath(existingData.learningPathContent);
+        } else {
+            // If not, generate a new one and save it
+            const prompt = `Bạn là một người hướng dẫn học tập chuyên nghiệp, có khả năng chia nhỏ các chủ đề phức tạp thành một lộ trình học tập rõ ràng.
+            Khi người dùng yêu cầu một chủ đề, hãy trả lời bằng một danh sách các bài học có cấu trúc (dùng Markdown với gạch đầu dòng).
+            Đối với MỖI BÀI HỌC trong lộ trình, bạn PHẢI định dạng nó theo cú pháp đặc biệt sau: \`[Tên bài học]{"prompt":"Yêu cầu chi tiết để bạn giảng giải về bài học này"}\`. Prompt phải chi tiết và bằng tiếng Việt.
+            Yêu cầu của người dùng: Tạo một lộ trình học chi tiết cho chủ đề "${topic}".`;
+            
+            const result = await model.generateContent(prompt);
+            const responseText = result.response.text();
+            
+            // Save the newly generated path
+            await saveOrUpdateLearningProgress({ learningPathContent: responseText });
+            
+            renderLearningPath(responseText);
+        }
     } catch (error) {
         console.error("Error starting learning session:", error);
         learningContent.innerHTML = `<p class="text-red-500">Đã có lỗi xảy ra khi tạo lộ trình học. Vui lòng thử lại.</p>`;
@@ -2309,7 +2305,7 @@ function renderLessonContent(responseText, prompt, buttonElement) {
     const sanitizedPrompt = prompt.replace(/"/g, '&quot;');
     if (!completedTopics.includes(sanitizedPrompt)) {
         completedTopics.push(sanitizedPrompt);
-        saveLearningProgress();
+        saveOrUpdateLearningProgress({ completedPrompts: completedTopics });
     }
     buttonElement.classList.add('completed');
     const iconSpan = buttonElement.querySelector('.icon');
@@ -2436,14 +2432,13 @@ learningContent.addEventListener('click', (e) => {
     }
 });
 
-// NEW: Event delegation for recent topic buttons
 dynamicControlsContainer.addEventListener('click', (e) => {
     if (e.target.classList.contains('btn-recent-topic')) {
         const topic = e.target.textContent;
         const topicInput = document.getElementById('topicInput');
         if (topicInput) {
             topicInput.value = topic;
-            generateButton.click(); // Simulate a click on the main button
+            generateButton.click();
         }
     }
 });
