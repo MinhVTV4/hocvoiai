@@ -146,12 +146,12 @@ let sessionResults = [];
 let conversationHistory = [];
 const synth = window.speechSynthesis;
 let audioState = { utterance: null, isPaused: false };
-let completedTopics = [];
-let openLessons = [];
-let learningCache = {};
-let lastWritingFeedback = null;
-let lastConversationFeedback = null;
-let currentLearningTopic = '';
+let completedTopics = []; // For learning mode
+let openLessons = []; // NEW: To track open lessons
+let learningCache = {}; // Cache for learning mode lessons
+let lastWritingFeedback = null; // To store writing feedback
+let lastConversationFeedback = null; // To store conversation feedback
+let currentLearningTopic = ''; // To store the current learning topic
 
 // --- System Prompt for Learning Mode ---
 const LEARNING_MODE_SYSTEM_PROMPT = `**CHỈ THỊ HỆ THỐNG - CHẾ ĐỘ HỌC TẬP ĐANG BẬT**
@@ -2072,6 +2072,7 @@ function setupAudioPlayer() {
 }
 
 // --- LEARNING MODE FUNCTIONS ---
+// OPTIMIZED: Combined save/update function
 async function saveOrUpdateLearningProgress(data) {
     if (!currentUser || !currentLearningTopic) {
         return;
@@ -2129,13 +2130,15 @@ async function startLearningSession() {
         const existingData = docSnap.data();
 
         completedTopics = existingData?.completedPrompts || [];
-        openLessons = existingData?.openLessonPrompts || [];
-        learningCache = existingData?.lessonContents || {}; // Load cached content
+        openLessons = existingData?.openLessonPrompts || []; // Load open lessons state
 
         if (existingData?.learningPathContent) {
             renderLearningPath(existingData.learningPathContent);
         } else {
-   
+            const prompt = `Bạn là một người hướng dẫn học tập chuyên nghiệp, có khả năng chia nhỏ các chủ đề phức tạp thành một lộ trình học tập rõ ràng.
+            Khi người dùng yêu cầu một chủ đề, hãy trả lời bằng một danh sách các bài học có cấu trúc (dùng Markdown với gạch đầu dòng).
+            Đối với MỖI BÀI HỌC trong lộ trình, bạn PHẢI định dạng nó theo cú pháp đặc biệt sau: \`[Tên bài học]{"prompt":"Yêu cầu chi tiết để bạn giảng giải về bài học này"}\`. Prompt phải chi tiết và bằng tiếng Việt.
+            Yêu cầu của người dùng: Tạo một lộ trình học chi tiết cho chủ đề "${topic}".`;
             
             const result = await model.generateContent(prompt);
             const responseText = result.response.text();
@@ -2184,12 +2187,13 @@ function renderLearningPath(text) {
     pathContainer.appendChild(tempDiv);
     learningContent.appendChild(pathContainer);
     
+    // NEW: Automatically open lessons that were open before
     if (openLessons.length > 0) {
         setTimeout(() => {
             openLessons.forEach(prompt => {
                 const button = learningContent.querySelector(`.learning-link[data-prompt="${prompt}"]`);
                 if (button) {
-                    fetchAndDisplayLesson(prompt, button, false);
+                    fetchAndDisplayLesson(prompt, button, false); // false = don't collapse others
                 }
             });
         }, 100);
@@ -2209,7 +2213,6 @@ async function fetchAndDisplayLesson(prompt, buttonElement, collapseOthers = tru
         return;
     }
     
-    // OPTIMIZED: Check cache first
     if (learningCache[prompt]) {
         renderLessonContent(learningCache[prompt], prompt, buttonElement);
         return;
@@ -2225,6 +2228,7 @@ async function fetchAndDisplayLesson(prompt, buttonElement, collapseOthers = tru
                 item.classList.add('collapsed');
             }
         });
+        // NEW: When collapsing others, update the state
         openLessons = [prompt];
         saveOrUpdateLearningProgress({ openLessonPrompts: openLessons });
     }
@@ -2232,13 +2236,13 @@ async function fetchAndDisplayLesson(prompt, buttonElement, collapseOthers = tru
     lessonContainer = document.createElement('div');
     lessonContainer.id = lessonContainerId;
     lessonContainer.className = 'learning-item fade-in';
-    lessonContainer.dataset.prompt = prompt;
+    lessonContainer.dataset.prompt = prompt; // Add prompt for tracking
     lessonContainer.innerHTML = `<div class="text-center p-4"><div class="spinner h-6 w-6 mx-auto mb-3"></div><p class="font-semibold">AI đang tạo nội dung bài học...</p></div>`;
     learningContent.appendChild(lessonContainer);
     lessonContainer.scrollIntoView({ behavior: 'smooth', block: 'center' });
 
     try {
-             const fullPrompt = `Bạn là một gia sư AI chuyên nghiệp. Hãy tạo một bài giảng chi tiết và có cấu trúc rõ ràng cho yêu cầu sau.
+        const fullPrompt = `Bạn là một gia sư AI chuyên nghiệp. Hãy tạo một bài giảng chi tiết và có cấu trúc rõ ràng cho yêu cầu sau.
         QUY TẮC TRÌNH BÀY (RẤT QUAN TRỌNG):
         1.  **Tiêu đề chính:** Bắt đầu bằng một tiêu đề chính (ví dụ: \`# Giới thiệu về Thì Hiện tại Đơn\`).
         2.  **Cấu trúc rõ ràng:** Sử dụng các tiêu đề phụ (\`##\`, \`###\`) để chia nhỏ các phần như "Định nghĩa", "Cách dùng", "Cấu trúc", "Ví dụ".
@@ -2254,10 +2258,7 @@ async function fetchAndDisplayLesson(prompt, buttonElement, collapseOthers = tru
         const result = await model.generateContent(fullPrompt);
         const responseText = result.response.text();
         
-        // OPTIMIZED: Update cache and save to Firestore
         learningCache[prompt] = responseText;
-        await saveOrUpdateLearningProgress({ lessonContents: learningCache });
-        
         renderLessonContent(responseText, prompt, buttonElement);
 
     } catch (error) {
@@ -2279,7 +2280,7 @@ function renderLessonContent(responseText, prompt, buttonElement) {
         lessonContainer = document.createElement('div');
         lessonContainer.id = lessonContainerId;
         lessonContainer.className = 'learning-item fade-in';
-        lessonContainer.dataset.prompt = prompt;
+        lessonContainer.dataset.prompt = prompt; // Add prompt for tracking
         learningContent.appendChild(lessonContainer);
     }
 
@@ -2455,9 +2456,9 @@ learningContent.addEventListener('click', (e) => {
             
             const prompt = lessonItem.dataset.prompt;
             if (prompt) {
-                if (wasCollapsed) {
+                if (wasCollapsed) { // It is now open
                     if (!openLessons.includes(prompt)) openLessons.push(prompt);
-                } else {
+                } else { // It is now collapsed
                     openLessons = openLessons.filter(p => p !== prompt);
                 }
                 saveOrUpdateLearningProgress({ openLessonPrompts: openLessons });
