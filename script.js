@@ -2224,7 +2224,7 @@ learningContent.addEventListener('click', (e) => {
     }
 });
 
-// --- SCROLL TO TOP LOGIC ---
+// --- SCROLL TO TOP LOGIC I---
 window.addEventListener('scroll', () => {
     if (window.scrollY > 400) {
         scrollToTopBtn.classList.add('visible');
