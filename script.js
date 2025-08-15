@@ -147,6 +147,7 @@ let conversationHistory = [];
 const synth = window.speechSynthesis;
 let audioState = { utterance: null, isPaused: false };
 let completedTopics = []; // For learning mode
+let openLessons = []; // NEW: To track open lessons
 let learningCache = {}; // Cache for learning mode lessons
 let lastWritingFeedback = null; // To store writing feedback
 let lastConversationFeedback = null; // To store conversation feedback
@@ -308,11 +309,12 @@ function resetQuizState() {
     generatedExercisesCache = [];
     sessionResults = [];
     conversationHistory = [];
-    completedTopics = []; // For learning mode
-    learningCache = {}; // Cache for learning mode lessons
-    lastWritingFeedback = null; // To store writing feedback
-    lastConversationFeedback = null; // To store conversation feedback
-    currentLearningTopic = ''; // Reset current learning topic
+    completedTopics = [];
+    openLessons = [];
+    learningCache = {};
+    lastWritingFeedback = null;
+    lastConversationFeedback = null;
+    currentLearningTopic = '';
 
     exerciseListContainer.innerHTML = '';
     interactiveQuestionHost.innerHTML = '';
@@ -2083,7 +2085,7 @@ async function saveOrUpdateLearningProgress(data) {
         userName: currentUser.displayName,
         topic: currentLearningTopic,
         lastAccessed: serverTimestamp(),
-        ...data // Spread the incoming data (pathContent or completedPrompts)
+        ...data
     };
 
     try {
@@ -2122,19 +2124,17 @@ async function startLearningSession() {
     animateTyping('loading-typing-text', loadingMessage, 70);
 
     try {
-        // OPTIMIZED: Check for existing path first
         const docId = `${currentUser.uid}_${topic.replace(/\s+/g, '_').toLowerCase()}`;
         const docRef = doc(db, "userLearningProgress", docId);
         const docSnap = await getDoc(docRef);
         const existingData = docSnap.data();
 
         completedTopics = existingData?.completedPrompts || [];
+        openLessons = existingData?.openLessonPrompts || []; // Load open lessons state
 
         if (existingData?.learningPathContent) {
-            // If path exists, render it directly
             renderLearningPath(existingData.learningPathContent);
         } else {
-            // If not, generate a new one and save it
             const prompt = `Bạn là một người hướng dẫn học tập chuyên nghiệp, có khả năng chia nhỏ các chủ đề phức tạp thành một lộ trình học tập rõ ràng.
             Khi người dùng yêu cầu một chủ đề, hãy trả lời bằng một danh sách các bài học có cấu trúc (dùng Markdown với gạch đầu dòng).
             Đối với MỖI BÀI HỌC trong lộ trình, bạn PHẢI định dạng nó theo cú pháp đặc biệt sau: \`[Tên bài học]{"prompt":"Yêu cầu chi tiết để bạn giảng giải về bài học này"}\`. Prompt phải chi tiết và bằng tiếng Việt.
@@ -2143,7 +2143,6 @@ async function startLearningSession() {
             const result = await model.generateContent(prompt);
             const responseText = result.response.text();
             
-            // Save the newly generated path
             await saveOrUpdateLearningProgress({ learningPathContent: responseText });
             
             renderLearningPath(responseText);
@@ -2187,11 +2186,24 @@ function renderLearningPath(text) {
 
     pathContainer.appendChild(tempDiv);
     learningContent.appendChild(pathContainer);
+    
+    // NEW: Automatically open lessons that were open before
+    if (openLessons.length > 0) {
+        setTimeout(() => {
+            openLessons.forEach(prompt => {
+                const button = learningContent.querySelector(`.learning-link[data-prompt="${prompt}"]`);
+                if (button) {
+                    fetchAndDisplayLesson(prompt, button, false); // false = don't collapse others
+                }
+            });
+        }, 100);
+    }
+
     lucide.createIcons();
     renderMath(learningContent);
 }
 
-async function fetchAndDisplayLesson(prompt, buttonElement) {
+async function fetchAndDisplayLesson(prompt, buttonElement, collapseOthers = true) {
     const lessonContainerId = `lesson-${prompt.replace(/[^a-zA-Z0-9]/g, '')}`;
     let lessonContainer = document.getElementById(lessonContainerId);
 
@@ -2210,15 +2222,21 @@ async function fetchAndDisplayLesson(prompt, buttonElement) {
     const iconSpan = buttonElement.querySelector('.icon');
     if (iconSpan) iconSpan.innerHTML = '<div class="spinner w-5 h-5"></div>';
     
-    learningContent.querySelectorAll('.learning-item:not(.collapsed)').forEach(item => {
-        if (item.id !== `lesson-path`) {
-            item.classList.add('collapsed');
-        }
-    });
+    if (collapseOthers) {
+        learningContent.querySelectorAll('.learning-item:not(.collapsed)').forEach(item => {
+            if (item.id !== `lesson-path`) {
+                item.classList.add('collapsed');
+            }
+        });
+        // NEW: When collapsing others, update the state
+        openLessons = [prompt];
+        saveOrUpdateLearningProgress({ openLessonPrompts: openLessons });
+    }
 
     lessonContainer = document.createElement('div');
     lessonContainer.id = lessonContainerId;
     lessonContainer.className = 'learning-item fade-in';
+    lessonContainer.dataset.prompt = prompt; // Add prompt for tracking
     lessonContainer.innerHTML = `<div class="text-center p-4"><div class="spinner h-6 w-6 mx-auto mb-3"></div><p class="font-semibold">AI đang tạo nội dung bài học...</p></div>`;
     learningContent.appendChild(lessonContainer);
     lessonContainer.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -2262,6 +2280,7 @@ function renderLessonContent(responseText, prompt, buttonElement) {
         lessonContainer = document.createElement('div');
         lessonContainer.id = lessonContainerId;
         lessonContainer.className = 'learning-item fade-in';
+        lessonContainer.dataset.prompt = prompt; // Add prompt for tracking
         learningContent.appendChild(lessonContainer);
     }
 
@@ -2422,12 +2441,28 @@ learningContent.addEventListener('click', (e) => {
 
     if (link) {
         e.preventDefault();
-        fetchAndDisplayLesson(link.dataset.prompt, link);
+        const prompt = link.dataset.prompt;
+        if (!openLessons.includes(prompt)) {
+            openLessons.push(prompt);
+            saveOrUpdateLearningProgress({ openLessonPrompts: openLessons });
+        }
+        fetchAndDisplayLesson(prompt, link);
     } else if (titleToggle) {
         e.preventDefault();
         const lessonItem = titleToggle.closest('.learning-item');
         if (lessonItem) {
+            const wasCollapsed = lessonItem.classList.contains('collapsed');
             lessonItem.classList.toggle('collapsed');
+            
+            const prompt = lessonItem.dataset.prompt;
+            if (prompt) {
+                if (wasCollapsed) { // It is now open
+                    if (!openLessons.includes(prompt)) openLessons.push(prompt);
+                } else { // It is now collapsed
+                    openLessons = openLessons.filter(p => p !== prompt);
+                }
+                saveOrUpdateLearningProgress({ openLessonPrompts: openLessons });
+            }
         }
     }
 });
