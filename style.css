@@ -593,6 +593,16 @@ body {
 }
 
 /* Tab styling */
+.tab-btn {
+    border-color: transparent;
+    transition: all 0.2s ease-in-out;
+}
+
+.tab-btn:hover {
+    color: hsl(var(--foreground));
+    border-color: hsl(var(--border));
+}
+
 .tab-btn.active {
     border-color: #4f46e5; /* Indigo 500 */
     color: #4f46e5;
