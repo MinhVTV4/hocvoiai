@@ -2,7 +2,7 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.9.0/firebase-app.js";
 import { getAI, getGenerativeModel } from "https://www.gstatic.com/firebasejs/11.9.0/firebase-ai.js";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.9.0/firebase-auth.js";
-import { getFirestore, collection, addDoc, query, where, getDocs, orderBy, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.9.0/firebase-firestore.js";
+import { getFirestore, collection, addDoc, query, where, getDocs, orderBy, serverTimestamp, doc, getDoc, setDoc } from "https://www.gstatic.com/firebasejs/11.9.0/firebase-firestore.js";
 
 // Your web app's Firebase configuration
 const firebaseConfig = {
@@ -147,9 +147,10 @@ let conversationHistory = [];
 const synth = window.speechSynthesis;
 let audioState = { utterance: null, isPaused: false };
 let completedTopics = []; // For learning mode
-let learningCache = {}; // NEW: Cache for learning mode lessons
+let learningCache = {}; // Cache for learning mode lessons
 let lastWritingFeedback = null; // To store writing feedback
 let lastConversationFeedback = null; // To store conversation feedback
+let currentLearningTopic = ''; // To store the current learning topic
 
 // --- System Prompt for Learning Mode ---
 const LEARNING_MODE_SYSTEM_PROMPT = `**CHỈ THỊ HỆ THỐNG - CHẾ ĐỘ HỌC TẬP ĐANG BẬT**
@@ -159,14 +160,13 @@ Bạn là một người hướng dẫn học tập chuyên nghiệp, có khả 
 `;
 
 // --- Utility Functions ---
-// NEW: Typing effect utility
 function animateTyping(element, text, delay = 50) {
     if (typeof element === 'string') {
         element = document.getElementById(element);
     }
     if (!element) return;
 
-    element.textContent = ''; // Clear existing text
+    element.textContent = '';
     let i = 0;
     function type() {
         if (i < text.length) {
@@ -195,7 +195,6 @@ function extractAndParseJson(rawText) {
     }
 }
 
-// NEW: Modal Alert Function
 function showModalAlert(message) {
     alertModalText.textContent = message;
     alertModal.classList.add('active');
@@ -216,7 +215,6 @@ function getListeningPrompt(level, topic, count, length) {
 function getWritingTopicPrompt(level, topic) { 
     return `You are an English teacher. Generate a single, engaging writing topic for an English learner at the ${level} CEFR level. The topic should be related to "${topic}". The topic should be a question or a statement to respond to. Provide only the topic text, without any extra labels or quotation marks. Example: "Describe your favorite kind of technology and explain why you like it."`; 
 }
-// UPDATED: Added writingPrompt parameter for context
 function getWritingFeedbackPrompt(level, topic, writingPrompt, userText) { 
     return `You are an expert English writing evaluator. A student at the ${level} CEFR level has written the following text in response to the prompt: "${writingPrompt}". The general topic is "${topic}". IMPORTANT: The 'correctedTextHTML' field in your response MUST be a direct correction of the student's provided text below, using "<del>" and "<ins>" tags. Do not invent a new text. Student's text: """ ${userText} """ Please provide feedback in Vietnamese. You MUST wrap your entire response in a 'json' markdown code block. The JSON object must have the following structure: 1. "overallFeedback": A general comment in Vietnamese (2-3 sentences) on the text's content, clarity, and how well it addresses the prompt. 2. "score": An integer score from 0 to 100. 3. "correctedTextHTML": The student's original text with corrections applied. 4. "detailedFeedback": An array of objects, where each object explains a specific mistake. Each object should have: "type", "mistake", "correction", "explanation". Example of the required JSON output: \`\`\`json\n{ "overallFeedback": "...", "score": 75, "correctedTextHTML": "...", "detailedFeedback": [ { "type": "Grammar", "mistake": "...", "correction": "...", "explanation": "..." } ] }\n\`\`\``; 
 }
@@ -311,9 +309,10 @@ function resetQuizState() {
     sessionResults = [];
     conversationHistory = [];
     completedTopics = []; // For learning mode
-    learningCache = {}; // NEW: Cache for learning mode lessons
+    learningCache = {}; // Cache for learning mode lessons
     lastWritingFeedback = null; // To store writing feedback
     lastConversationFeedback = null; // To store conversation feedback
+    currentLearningTopic = ''; // Reset current learning topic
 
     exerciseListContainer.innerHTML = '';
     interactiveQuestionHost.innerHTML = '';
@@ -429,7 +428,6 @@ async function startPractice() {
 }
 
 // --- LISTENING FEATURE ---
-// UPDATED: Standardizes data structure to fix bugs
 async function startListeningPractice() {
     if (!model) { updateStatus('error', "Mô hình AI chưa được khởi tạo."); return; }
     setLoadingState(true);
@@ -461,7 +459,6 @@ async function startListeningPractice() {
         
         currentQuizData.raw = parsedData;
         
-        // --- FIX: Standardize question data structure ---
         const standardizedQuestions = parsedData.questions.map(q => {
             const correctIndex = q.options.indexOf(q.answer);
             return {
@@ -469,14 +466,14 @@ async function startListeningPractice() {
                 args: {
                     question: q.question,
                     options: q.options,
-                    correctAnswerIndex: correctIndex !== -1 ? correctIndex : 0, // Fallback to 0 if not found
+                    correctAnswerIndex: correctIndex !== -1 ? correctIndex : 0,
                     explanation: q.explanation
                 }
             };
         });
 
         generatedExercisesCache = standardizedQuestions;
-        allQuestions = standardizedQuestions; // This fixes both Practice and Interactive mode bugs
+        allQuestions = standardizedQuestions;
         
         switchView('exercise');
         renderListeningQuiz();
@@ -499,11 +496,11 @@ function renderListeningQuiz() {
     if (modeSelect.value === 'practice') {
         practiceModeContainer.classList.remove('hidden');
         interactiveModeContainer.classList.add('hidden');
-        renderPracticeMode(allQuestions); // Use allQuestions now
+        renderPracticeMode(allQuestions);
     } else {
         practiceModeContainer.classList.add('hidden');
         interactiveModeContainer.classList.remove('hidden');
-        renderInteractiveMode(allQuestions); // Use allQuestions now
+        renderInteractiveMode(allQuestions);
     }
 }
 
@@ -528,7 +525,6 @@ async function startWritingPractice() {
         const response = await result.response;
         const topicText = response.text();
         
-        // --- FIX: Store the specific writing prompt ---
         currentQuizData.writingPrompt = topicText;
 
         writingTopic.textContent = topicText;
@@ -565,7 +561,6 @@ async function getWritingFeedback() {
 
     try {
         const { level, topic, writingPrompt } = currentQuizData;
-        // --- FIX: Pass the specific writing prompt for context ---
         const prompt = getWritingFeedbackPrompt(level, topic, writingPrompt, userText);
         const result = await model.generateContent(prompt);
         const response = await result.response;
@@ -576,7 +571,7 @@ async function getWritingFeedback() {
             throw new Error("Invalid feedback data from AI.");
         }
         
-        lastWritingFeedback = feedbackData; // Store feedback for reinforcement/expansion
+        lastWritingFeedback = feedbackData;
         displayWritingFeedback(feedbackData);
         writingActionsContainer.classList.remove('hidden');
 
@@ -617,9 +612,8 @@ function displayWritingFeedback(data) {
         </div>
     `;
     
-    // --- NEW: Add reinforcement/expansion buttons ---
     const actionsContainer = document.getElementById('writing-actions-container');
-    actionsContainer.innerHTML = ''; // Clear existing buttons
+    actionsContainer.innerHTML = ''; 
     
     const reinforceBtn = document.createElement('button');
     reinforceBtn.className = 'btn btn-secondary';
@@ -637,9 +631,6 @@ function displayWritingFeedback(data) {
     lucide.createIcons();
 }
 
-// =================================================================
-// START: CODE FIX - ADDED MISSING FUNCTIONS
-// =================================================================
 async function handleWritingReinforcement() {
     if (!lastWritingFeedback || !lastWritingFeedback.detailedFeedback || lastWritingFeedback.detailedFeedback.length === 0) {
         showModalAlert("Không có lỗi cụ thể nào được tìm thấy để tạo bài học củng cố.");
@@ -650,7 +641,6 @@ async function handleWritingReinforcement() {
     lessonTitle.textContent = "Bài học Củng cố Kiến thức";
     lessonContent.innerHTML = '<div class="spinner mx-auto"></div>';
 
-    // Create a prompt based on the mistakes
     const mistakesSummary = lastWritingFeedback.detailedFeedback.map(fb => 
         `- Lỗi ${fb.type}: "${fb.mistake}" (Sửa thành: "${fb.correction}"). Giải thích: ${fb.explanation}`
     ).join('\n');
@@ -687,7 +677,6 @@ async function handleWritingExpansion() {
     lessonContent.innerHTML = '<div class="spinner mx-auto"></div>';
 
     const originalText = writingInput.value;
-    // Remove <del> and <ins> tags to get the clean corrected text
     const correctedText = lastWritingFeedback.correctedTextHTML.replace(/<\/?del>|<\/?ins>/g, ''); 
 
     const prompt = `Bạn là một chuyên gia đánh giá bài viết tiếng Anh. Một học sinh đã viết bài sau:
@@ -718,10 +707,6 @@ async function handleWritingExpansion() {
         lessonContent.innerHTML = `<p class="text-red-500">Lỗi: Không thể tạo gợi ý nâng cao.</p>`;
     }
 }
-// =================================================================
-// END: CODE FIX
-// =================================================================
-
 
 // --- CONVERSATION FEATURE ---
 async function startConversationPractice() {
@@ -805,7 +790,7 @@ async function endConversationAndGetFeedback() {
             throw new Error("Invalid conversation feedback from AI."); 
         }
         
-        lastConversationFeedback = feedbackData; // Store feedback
+        lastConversationFeedback = feedbackData;
         displayConversationFeedback(feedbackData);
 
     } catch(error) {
@@ -851,7 +836,6 @@ function displayConversationFeedback(data) {
                 `).join('')}
             </div>
         </div>
-        <!-- NEW: Add reinforcement/expansion buttons -->
         <div class="mt-6 flex justify-center gap-4">
             <button id="conversation-reinforce-btn" class="btn btn-secondary"><i data-lucide="shield-question" class="w-5 h-5 mr-2"></i> Luyện tập lỗi sai</button>
             <button id="conversation-expand-btn" class="btn btn-secondary"><i data-lucide="sparkles" class="w-5 h-5 mr-2"></i> Thử thách nâng cao</button>
@@ -863,16 +847,12 @@ function displayConversationFeedback(data) {
     lucide.createIcons();
 }
 
-// =================================================================
-// START: CODE FIX 2 - ADDED MISSING CONVERSATION FUNCTIONS
-// =================================================================
 async function handleConversationReinforcement() {
     if (!lastConversationFeedback || !lastConversationFeedback.areasForImprovement || lastConversationFeedback.areasForImprovement.length === 0) {
         showModalAlert("Không có lỗi cụ thể nào được tìm thấy để tạo bài học củng cố.");
         return;
     }
 
-    // Keep the modal open, but change its content
     lessonTitle.textContent = "Bài học Củng cố từ Hội thoại";
     lessonContent.innerHTML = '<div class="spinner mx-auto"></div>';
 
@@ -907,7 +887,6 @@ async function handleConversationExpansion() {
         return;
     }
 
-    // Keep the modal open, but change its content
     lessonTitle.textContent = "Thử thách Nâng cao Hội thoại";
     lessonContent.innerHTML = '<div class="spinner mx-auto"></div>';
 
@@ -936,9 +915,6 @@ async function handleConversationExpansion() {
         lessonContent.innerHTML = `<p class="text-red-500">Lỗi: Không thể tạo thử thách nâng cao.</p>`;
     }
 }
-// =================================================================
-// END: CODE FIX 2
-// =================================================================
 
 
 async function generateExercises() {
@@ -1082,7 +1058,7 @@ async function generateExercises() {
 
         paperSubject.innerHTML = `<strong>Môn học:</strong> ${subjectText}`;
         switchView('exercise');
-        audioPlayerContainer.classList.add('hidden'); // Hide audio player for non-listening tasks
+        audioPlayerContainer.classList.add('hidden');
 
         if (modeSelect.value === 'practice') {
             practiceModeContainer.classList.remove('hidden');
@@ -1127,7 +1103,6 @@ const renderers = {
     'reading_passage': renderReadingPassage
 };
 
-// Renders a learning mode quiz (with immediate feedback button)
 const learningRenderers = {
     'multiple_choice': renderLearningMultipleChoice,
     'fill_in_the_blank': renderLearningFillInTheBlank,
@@ -1194,21 +1169,17 @@ function renderMultipleChoice(args, index) {
         });
     }
 
-    // Event Delegation for option selection
     optionsContainer.addEventListener('click', (e) => {
         const selectedCard = e.target.closest('.option-card');
         if (!selectedCard || selectedCard.disabled) return;
 
-        // Deselect other cards
         optionsContainer.querySelectorAll('.option-card').forEach(card => {
             card.classList.remove('selected');
         });
 
-        // Select the clicked card
         selectedCard.classList.add('selected');
         item.dataset.selectedAnswer = selectedCard.dataset.value;
 
-        // For interactive mode, enable the check button
         const checkButton = document.getElementById('interactive-check-btn');
         if (checkButton) checkButton.disabled = false;
     });
@@ -1320,7 +1291,6 @@ function renderShortAnswer(args, index) {
     return item;
 }
 
-// --- NEW Learning Quiz Renderers (with single check button) ---
 function renderLearningMultipleChoice(args) {
      const quizWrapper = document.createElement('div');
      quizWrapper.className = 'quiz-wrapper';
@@ -1460,8 +1430,8 @@ function renderPracticeMode(questionsToRender) {
     let questionCounter = 0;
     questionsToRender.forEach((item, index) => {
         const isListeningQuestion = currentQuizData.type === 'listening';
-        const args = isListeningQuestion ? item.args : item.args; // Now standardized
-        const name = isListeningQuestion ? item.name : item.name; // Now standardized
+        const args = isListeningQuestion ? item.args : item.args;
+        const name = isListeningQuestion ? item.name : item.name;
         const renderFunction = renderers[name];
         
         if (renderFunction) {
@@ -1535,8 +1505,6 @@ function displayCurrentInteractiveQuestion() {
     checkButton.disabled = true;
     interactiveFooter.appendChild(checkButton);
     
-    // The event listener for enabling the button is now inside renderMultipleChoice for MCQs
-    // We keep these for other question types
     interactiveQuestionHost.addEventListener('change', () => checkButton.disabled = false, { once: true });
     interactiveQuestionHost.addEventListener('input', () => checkButton.disabled = false, { once: true });
     interactiveQuestionHost.addEventListener('dragend', () => checkButton.disabled = false, { once: true });
@@ -1548,7 +1516,6 @@ function displayCurrentInteractiveQuestion() {
     renderMath(interactiveQuestionHost);
 }
 
-// UPDATED: Interactive Mode Answer Checking Logic
 function checkInteractiveAnswer(questionIndex) {
     const questionItem = interactiveQuestionHost.querySelector('.question-item');
     const { isCorrect, isGraded, userAnswer } = checkSingleAnswer(questionItem, true);
@@ -1564,16 +1531,13 @@ function checkInteractiveAnswer(questionIndex) {
         confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 } }); 
     }
     
-    // Disable all inputs in the question
     questionItem.querySelectorAll('input, textarea, button').forEach(el => el.disabled = true);
     questionItem.querySelectorAll('.sortable-item').forEach(el => el.draggable = false);
     
-    // --- NEW LOGIC FOR FOOTER ---
-    interactiveFooter.innerHTML = ''; // Clear the footer
+    interactiveFooter.innerHTML = '';
     const footerContainer = document.createElement('div');
     footerContainer.className = 'flex justify-center items-center gap-4 flex-wrap';
 
-    // Add Reinforce/Expand buttons to the footer
     const questionData = allQuestions[questionIndex];
     const args = questionData.args || questionData;
     if (isGraded) {
@@ -1595,7 +1559,6 @@ function checkInteractiveAnswer(questionIndex) {
         }
     }
 
-    // Add Continue button
     const continueButton = document.createElement('button');
     continueButton.id = 'interactive-continue-btn';
     continueButton.className = 'btn btn-primary';
@@ -1756,8 +1719,6 @@ function checkSingleAnswer(q, showFeedback = false) {
     return { isCorrect, isGraded, userAnswer };
 }
 
-
-// UPDATED: Practice Mode Answer Checking
 function checkAllPracticeAnswers() {
     let totalScore = 0; 
     let gradableQuestions = 0;
@@ -1781,7 +1742,6 @@ function checkAllPracticeAnswers() {
                 gradableQuestions++; 
                 if (result.isCorrect) totalScore++; 
                 
-                // --- NEW LOGIC TO ADD BUTTONS ---
                 const feedbackDiv = q_element.querySelector('.feedback-box');
                 if (feedbackDiv) {
                     const buttonContainer = document.createElement('div');
@@ -1864,11 +1824,20 @@ onAuthStateChanged(auth, user => {
         userInfo.classList.add('flex');
         userAvatar.src = user.photoURL;
         userName.textContent = user.displayName;
+        // NEW: Load recent topics if in learning mode
+        if (modeSelect.value === 'learning') {
+            loadAndDisplayRecentTopics();
+        }
     } else {
         currentUser = null;
         loginContainer.classList.remove('hidden');
         userInfo.classList.add('hidden');
         userInfo.classList.remove('flex');
+        // NEW: Clear recent topics on logout
+        const recentTopicsContainer = document.getElementById('recent-topics-container');
+        if (recentTopicsContainer) {
+            recentTopicsContainer.innerHTML = '';
+        }
     }
 });
 
@@ -1970,6 +1939,42 @@ async function renderHistory() {
 function updateStatus(type, message) { const colors = { 'success': 'text-green-600 dark:text-green-400', 'error': 'text-red-600 dark:text-red-400', 'info': 'text-gray-600 dark:text-gray-400' }; statusMessage.textContent = message; statusMessage.className = `mt-6 text-center font-semibold ${colors[type] || 'text-gray-600 dark:text-gray-400'}`; }
 function setLoadingState(isLoading) { generateButton.disabled = isLoading; const icon = generateButton.querySelector('i'); if(icon) icon.classList.toggle('hidden', isLoading); buttonText.classList.toggle('hidden', isLoading); buttonSpinner.classList.toggle('hidden', !isLoading); if (isLoading) updateStatus('info', 'AI đang làm việc, vui lòng chờ trong giây lát...'); }
 
+// OPTIMIZED: Function to load and display recent learning topics
+async function loadAndDisplayRecentTopics() {
+    const container = document.getElementById('recent-topics-container');
+    if (!container) return;
+
+    if (!currentUser) {
+        container.innerHTML = ''; // Clear if logged out
+        return;
+    }
+
+    container.innerHTML = `<div class="text-center"><div class="spinner h-5 w-5 mx-auto"></div></div>`;
+
+    try {
+        const q = query(collection(db, "userLearningProgress"), where("userId", "==", currentUser.uid), orderBy("lastAccessed", "desc"));
+        const querySnapshot = await getDocs(q);
+
+        if (querySnapshot.empty) {
+            container.innerHTML = ''; // No history, so show nothing
+            return;
+        }
+
+        let topicsHtml = `<h3 class="text-sm font-semibold text-gray-600 dark:text-gray-400 mb-3">Tiếp tục học:</h3><div class="flex flex-wrap gap-2">`;
+        querySnapshot.forEach(doc => {
+            const topic = doc.data().topic;
+            topicsHtml += `<button class="btn-recent-topic">${topic}</button>`;
+        });
+        topicsHtml += `</div>`;
+        container.innerHTML = topicsHtml;
+
+    } catch (error) {
+        console.error("Error fetching recent topics:", error);
+        container.innerHTML = `<p class="text-xs text-red-500">Không thể tải các chủ đề gần đây.</p>`;
+    }
+}
+
+
 function updateDynamicControls() {
     const subject = subjectSelect.value;
     const mode = modeSelect.value;
@@ -1998,6 +2003,13 @@ function updateDynamicControls() {
         if(topicInput && topicInput.tagName === 'TEXTAREA') {
             topicInput.placeholder = "Nhập chủ đề bạn muốn học, ví dụ: 'Lịch sử máy tính', 'Các thì trong Tiếng Anh'...";
         }
+        
+        // NEW: Add container for recent topics and load them
+        const recentTopicsDiv = document.createElement('div');
+        recentTopicsDiv.id = 'recent-topics-container';
+        recentTopicsDiv.className = 'mt-6';
+        dynamicControlsContainer.appendChild(recentTopicsDiv);
+        loadAndDisplayRecentTopics();
     }
 
     lucide.createIcons();
@@ -2062,6 +2074,46 @@ function setupAudioPlayer() {
 }
 
 // --- LEARNING MODE FUNCTIONS ---
+async function loadLearningProgress(topic) {
+    if (!currentUser) {
+        completedTopics = [];
+        return;
+    }
+    const docId = `${currentUser.uid}_${topic.replace(/\s+/g, '_').toLowerCase()}`;
+    const docRef = doc(db, "userLearningProgress", docId);
+    try {
+        const docSnap = await getDoc(docRef);
+        if (docSnap.exists()) {
+            completedTopics = docSnap.data().completedPrompts || [];
+        } else {
+            completedTopics = [];
+        }
+    } catch (error) {
+        console.error("Error loading learning progress:", error);
+        completedTopics = [];
+    }
+}
+
+async function saveLearningProgress() {
+    if (!currentUser || !currentLearningTopic) {
+        return;
+    }
+    const docId = `${currentUser.uid}_${currentLearningTopic.replace(/\s+/g, '_').toLowerCase()}`;
+    const docRef = doc(db, "userLearningProgress", docId);
+    const dataToSave = {
+        userId: currentUser.uid,
+        userName: currentUser.displayName,
+        topic: currentLearningTopic,
+        completedPrompts: completedTopics,
+        lastAccessed: serverTimestamp()
+    };
+    try {
+        await setDoc(docRef, dataToSave, { merge: true });
+    } catch (error) {
+        console.error("Error saving learning progress:", error);
+    }
+}
+
 async function startLearningSession() {
     if (!model) { updateStatus('error', "Mô hình AI chưa được khởi tạo."); return; }
     setLoadingState(true);
@@ -2073,11 +2125,15 @@ async function startLearningSession() {
         setLoadingState(false);
         return;
     }
+    
+    currentLearningTopic = topic;
 
-        learningPathTitle.textContent = `Lộ trình học: ${topic}`;
+    await loadLearningProgress(topic);
+
+    learningPathTitle.textContent = `Lộ trình học: ${topic}`;
     learningPathSubject.textContent = subjectSelect.options[subjectSelect.selectedIndex].text;
     switchView('learning');
-    // MODIFIED: Added a span with ID for typing effect
+    
     const loadingMessage = "AI đang tạo lộ trình học, vui lòng chờ...";
     learningContent.innerHTML = `
         <div class="text-center p-6 card">
@@ -2085,8 +2141,7 @@ async function startLearningSession() {
             <p class="font-semibold text-lg"><span id="loading-typing-text"></span></p>
         </div>
     `;
-    // NEW: Call animateTyping on the specific span
-    animateTyping('loading-typing-text', loadingMessage, 70); // Adjust delay as needed
+    animateTyping('loading-typing-text', loadingMessage, 70);
 
     try {
         const prompt = `Bạn là một người hướng dẫn học tập chuyên nghiệp, có khả năng chia nhỏ các chủ đề phức tạp thành một lộ trình học tập rõ ràng.
@@ -2106,10 +2161,10 @@ async function startLearningSession() {
 }
 
 function renderLearningPath(text) {
-    learningContent.innerHTML = ''; // Clear spinner
+    learningContent.innerHTML = '';
     const pathContainer = document.createElement('div');
     pathContainer.className = 'learning-item';
-    pathContainer.id = 'lesson-path'; // Add an ID to prevent it from being collapsed
+    pathContainer.id = 'lesson-path';
     
     const tempDiv = document.createElement('div');
     tempDiv.innerHTML = marked.parse(text);
@@ -2146,7 +2201,7 @@ async function fetchAndDisplayLesson(prompt, buttonElement) {
 
     if (lessonContainer) {
         lessonContainer.classList.remove('collapsed');
-                lessonContainer.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        lessonContainer.scrollIntoView({ behavior: 'smooth', block: 'start' });
         return;
     }
     
@@ -2159,9 +2214,8 @@ async function fetchAndDisplayLesson(prompt, buttonElement) {
     const iconSpan = buttonElement.querySelector('.icon');
     if (iconSpan) iconSpan.innerHTML = '<div class="spinner w-5 h-5"></div>';
     
-    // UPDATED: Collapse other lessons before creating a new one
     learningContent.querySelectorAll('.learning-item:not(.collapsed)').forEach(item => {
-        if (item.id !== `lesson-path`) { // Don't collapse the main path
+        if (item.id !== `lesson-path`) {
             item.classList.add('collapsed');
         }
     });
@@ -2174,8 +2228,7 @@ async function fetchAndDisplayLesson(prompt, buttonElement) {
     lessonContainer.scrollIntoView({ behavior: 'smooth', block: 'center' });
 
     try {
-        // UPDATED: New, more detailed prompt for lesson content
-                const fullPrompt = `Bạn là một gia sư AI chuyên nghiệp. Hãy tạo một bài giảng chi tiết và có cấu trúc rõ ràng cho yêu cầu sau.
+        const fullPrompt = `Bạn là một gia sư AI chuyên nghiệp. Hãy tạo một bài giảng chi tiết và có cấu trúc rõ ràng cho yêu cầu sau.
         QUY TẮC TRÌNH BÀY (RẤT QUAN TRỌNG):
         1.  **Tiêu đề chính:** Bắt đầu bằng một tiêu đề chính (ví dụ: \`# Giới thiệu về Thì Hiện tại Đơn\`).
         2.  **Cấu trúc rõ ràng:** Sử dụng các tiêu đề phụ (\`##\`, \`###\`) để chia nhỏ các phần như "Định nghĩa", "Cách dùng", "Cấu trúc", "Ví dụ".
@@ -2191,7 +2244,7 @@ async function fetchAndDisplayLesson(prompt, buttonElement) {
         const result = await model.generateContent(fullPrompt);
         const responseText = result.response.text();
         
-        learningCache[prompt] = responseText; // Cache the result
+        learningCache[prompt] = responseText;
         renderLessonContent(responseText, prompt, buttonElement);
 
     } catch (error) {
@@ -2218,12 +2271,9 @@ function renderLessonContent(responseText, prompt, buttonElement) {
 
     const formattedContent = marked.parse(responseText);
     
-    // UPDATED: Title is now a toggle button
-        // Create a temporary div to manipulate the HTML before adding to DOM
     const tempDiv = document.createElement('div');
     tempDiv.innerHTML = `<div class="prose max-w-none text-gray-700 dark:text-gray-300">${DOMPurify.sanitize(formattedContent, { ADD_TAGS: ["iframe"], ADD_ATTR: ['allow', 'allowfullscreen', 'frameborder', 'scrolling'] })}</div>`;
 
-    // Apply specific classes to blockquotes based on content
     tempDiv.querySelectorAll('blockquote').forEach(bq => {
         const firstParagraph = bq.querySelector('p');
         if (firstParagraph) {
@@ -2232,11 +2282,9 @@ function renderLessonContent(responseText, prompt, buttonElement) {
                 const textContent = strongElement.textContent.trim();
                 if (textContent.startsWith('Ví dụ:')) {
                     bq.classList.add('example');
-                    // Remove "Ví dụ:" from the content of the strong tag
                     strongElement.textContent = strongElement.textContent.replace('Ví dụ:', '').trim();
                 } else if (textContent.startsWith('Lưu ý:') || textContent.startsWith('Mẹo:')) {
                     bq.classList.add('note');
-                    // Remove "Lưu ý:" or "Mẹo:" from the content of the strong tag
                     strongElement.textContent = strongElement.textContent.replace(/Lưu ý:|Mẹo:/, '').trim();
                 }
             }
@@ -2249,9 +2297,9 @@ function renderLessonContent(responseText, prompt, buttonElement) {
     
     const lessonBodyEl = document.createElement('div');
     lessonBodyEl.className = 'lesson-body';
-    lessonBodyEl.appendChild(tempDiv.firstElementChild); // Append the .prose div from tempDiv
+    lessonBodyEl.appendChild(tempDiv.firstElementChild);
 
-    lessonContainer.innerHTML = ''; // Clear previous content or spinner
+    lessonContainer.innerHTML = '';
     lessonContainer.appendChild(lessonTitleEl);
     lessonContainer.appendChild(lessonBodyEl);
     
@@ -2261,6 +2309,7 @@ function renderLessonContent(responseText, prompt, buttonElement) {
     const sanitizedPrompt = prompt.replace(/"/g, '&quot;');
     if (!completedTopics.includes(sanitizedPrompt)) {
         completedTopics.push(sanitizedPrompt);
+        saveLearningProgress();
     }
     buttonElement.classList.add('completed');
     const iconSpan = buttonElement.querySelector('.icon');
@@ -2387,6 +2436,19 @@ learningContent.addEventListener('click', (e) => {
     }
 });
 
+// NEW: Event delegation for recent topic buttons
+dynamicControlsContainer.addEventListener('click', (e) => {
+    if (e.target.classList.contains('btn-recent-topic')) {
+        const topic = e.target.textContent;
+        const topicInput = document.getElementById('topicInput');
+        if (topicInput) {
+            topicInput.value = topic;
+            generateButton.click(); // Simulate a click on the main button
+        }
+    }
+});
+
+
 // --- SCROLL TO TOP LOGIC ---
 window.addEventListener('scroll', () => {
     if (window.scrollY > 400) {
@@ -2412,7 +2474,6 @@ themeToggleBtn.addEventListener('click', () => {
 
 // --- INITIALIZATION ---
 document.addEventListener('DOMContentLoaded', () => {
-    // Load theme from local storage
     if (localStorage.getItem('theme') === 'dark' || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
         document.documentElement.classList.add('dark');
     } else {
