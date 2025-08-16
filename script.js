@@ -16,7 +16,7 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 let model;
-const GEMINI_MODEL_NAME = "gemini-1.5-flash";
+const GEMINI_MODEL_NAME = "gemini-2.5-flash";
 const auth = getAuth(app);
 const db = getFirestore(app);
 const provider = new GoogleAuthProvider();
@@ -192,17 +192,9 @@ function extractAndParseJson(rawText) {
         return JSON.parse(jsonString); 
     } catch (error) { 
         console.error("JSON Parse Error:", error, "String:", jsonString); 
-        // Attempt to fix common errors, like trailing commas
-        const fixedJsonString = jsonString.replace(/,\s*([}\]])/g, '$1');
-        try {
-            return JSON.parse(fixedJsonString);
-        } catch (finalError) {
-            console.error("Final JSON Parse Error:", finalError, "Fixed String:", fixedJsonString);
-            return null;
-        }
+        return null; 
     }
 }
-
 
 function showModalAlert(message) {
     alertModalText.textContent = message;
@@ -1113,12 +1105,14 @@ const renderers = {
     'reading_passage': renderReadingPassage
 };
 
-// NEW: Renderers for learning mode quizzes
 const learningRenderers = {
     'multiple_choice': renderLearningMultipleChoice,
     'fill_in_the_blank': renderLearningFillInTheBlank,
+    'short_answer': renderLearningShortAnswer,
+    'flashcard': renderFlashcardQuiz,
+    'drag_and_drop_matching': renderDragAndDropMatchingQuiz,
+    'sentence_ordering': renderSentenceOrderingQuiz
 };
-
 
 function createQuestionItem(title, questionId) {
     const item = document.createElement('div');
@@ -1299,7 +1293,6 @@ function renderShortAnswer(args, index) {
     return item;
 }
 
-// --- NEW: Learning Mode Quiz Renderers ---
 function renderLearningMultipleChoice(args) {
      const quizWrapper = document.createElement('div');
      quizWrapper.className = 'quiz-wrapper';
@@ -1307,22 +1300,20 @@ function renderLearningMultipleChoice(args) {
      quizWrapper.dataset.correct = args.answer;
 
      let optionsHtml = '';
-     if (args.options && typeof args.options === 'object') {
-        Object.keys(args.options).forEach(key => {
-            optionsHtml += `
-                <button class="quiz-option-btn" data-option="${key}">
-                    <span class="quiz-option-letter">${key}</span>
-                    <span class="quiz-option-text">${DOMPurify.sanitize(args.options[key])}</span>
-                </button>
-            `;
-        });
-     }
+     Object.keys(args.options).forEach(key => {
+         optionsHtml += `
+             <button class="quiz-option-btn" data-option="${key}">
+                 <span class="quiz-option-letter">${key}</span>
+                 <span class="quiz-option-text">${DOMPurify.sanitize(args.options[key])}</span>
+             </button>
+         `;
+     });
      quizWrapper.innerHTML = `
          <p class="font-semibold mb-3">${DOMPurify.sanitize(args.question)}</p>
          <div class="space-y-2">
              ${optionsHtml}
          </div>
-         <div class="quiz-explanation mt-3 hidden p-3 rounded-md">${DOMPurify.sanitize(args.explanation)}</div>
+         <div class="quiz-explanation mt-3 hidden"></div>
      `;
      return quizWrapper;
 }
@@ -1331,23 +1322,109 @@ function renderLearningFillInTheBlank(args) {
     const quizWrapper = document.createElement('div');
     quizWrapper.className = 'quiz-wrapper';
     quizWrapper.dataset.type = 'fill_in_the_blank';
-    // Ensure blanks is an array
-    const blanks = Array.isArray(args.blanks) ? args.blanks : [args.blanks];
-    quizWrapper.dataset.blanks = JSON.stringify(blanks);
+    quizWrapper.dataset.blanks = JSON.stringify(args.blanks);
     quizWrapper.dataset.explanation = args.explanation;
 
     let sentenceHtml = DOMPurify.sanitize(args.sentence);
-    const renderInput = `<input type="text" class="quiz-blank-input" placeholder="...">`;
+    const numBlanks = (sentenceHtml.match(/\{\{BLANK\}\}/g) || []).length;
+    const renderInput = `<input type="text" class="quiz-blank-input inline-block w-32 mx-2 p-2 rounded-md dark:bg-gray-700" placeholder="...">`;
     sentenceHtml = sentenceHtml.replace(/\{\{BLANK\}\}/g, renderInput);
     
     quizWrapper.innerHTML = `
         <p class="font-semibold mb-3">${sentenceHtml}</p>
-        <button class="check-learning-quiz-btn btn btn-secondary btn-sm mt-4">Kiểm tra</button>
-        <div class="quiz-explanation mt-3 hidden p-3 rounded-md"></div>
+        <button class="check-learning-quiz-btn btn btn-primary mt-4">Kiểm tra</button>
+        <div class="quiz-explanation mt-3 hidden"></div>
     `;
     return quizWrapper;
 }
 
+function renderLearningShortAnswer(args) {
+    const quizWrapper = document.createElement('div');
+    quizWrapper.className = 'quiz-wrapper';
+    quizWrapper.dataset.type = 'short_answer';
+    quizWrapper.dataset.keywords = JSON.stringify(args.keywords);
+    quizWrapper.dataset.gist = args.expected_answer_gist;
+    quizWrapper.dataset.explanation = args.explanation;
+
+    quizWrapper.innerHTML = `
+        <p class="font-semibold mb-3">${DOMPurify.sanitize(args.question)}</p>
+        <textarea class="input-base w-full mt-2" rows="3" placeholder="Nhập câu trả lời của bạn..."></textarea>
+        <button class="check-learning-quiz-btn btn btn-primary mt-4">Kiểm tra</button>
+        <div class="quiz-explanation mt-3 hidden"></div>
+    `;
+    return quizWrapper;
+}
+
+function renderFlashcardQuiz(args) {
+     const quizWrapper = document.createElement('div');
+     quizWrapper.className = 'quiz-wrapper flashcard-quiz';
+     quizWrapper.dataset.type = 'flashcard';
+     quizWrapper.dataset.cardIndex = 0;
+     quizWrapper.dataset.quizData = JSON.stringify(args);
+
+     const cardsHtml = args.cards.map((card, i) => `
+        <div class="flashcard-face flashcard-front absolute w-full h-full flex flex-col items-center justify-center p-4 bg-white dark:bg-gray-900 rounded-lg shadow-md transition-all duration-300 ${i === 0 ? '' : 'hidden'}">
+            <span class="text-2xl font-bold">${DOMPurify.sanitize(card.front)}</span>
+        </div>
+        <div class="flashcard-face flashcard-back absolute w-full h-full flex flex-col items-center justify-center p-4 bg-white dark:bg-gray-900 rounded-lg shadow-md transition-all duration-300 opacity-0 hidden">
+            <span class="text-lg text-gray-700 dark:text-gray-300">${DOMPurify.sanitize(card.back)}</span>
+        </div>
+     `).join('');
+
+     quizWrapper.innerHTML = `
+        <p class="font-semibold mb-3">${DOMPurify.sanitize(args.title)}</p>
+        <div class="relative w-full h-48 cursor-pointer transform-gpu perspective-1000">
+            <div class="flashcard-inner w-full h-full relative text-center">
+                ${cardsHtml}
+            </div>
+        </div>
+        <div class="flex justify-between mt-4">
+            <button class="flashcard-nav-btn prev-btn btn btn-secondary"><i data-lucide="chevron-left" class="w-4 h-4"></i></button>
+            <span class="flashcard-counter text-sm font-semibold">${1}/${args.cards.length}</span>
+            <button class="flashcard-nav-btn next-btn btn btn-secondary"><i data-lucide="chevron-right" class="w-4 h-4"></i></button>
+        </div>
+     `;
+     return quizWrapper;
+}
+
+function renderDragAndDropMatchingQuiz(args) {
+    const quizWrapper = document.createElement('div');
+    quizWrapper.className = 'quiz-wrapper drag-drop-quiz';
+    quizWrapper.dataset.type = 'drag_and_drop_matching';
+    quizWrapper.dataset.quizData = JSON.stringify(args);
+
+    const itemsHtml = args.items.map(item => `<div class="drag-item" draggable="true" data-id="${item.id}">${DOMPurify.sanitize(item.text)}</div>`).join('');
+    const targetsHtml = args.targets.map(target => `<div class="drop-target" data-id="${target.id}">${DOMPurify.sanitize(target.text)}</div>`).join('');
+
+    quizWrapper.innerHTML = `
+        <p class="font-semibold mb-3">${DOMPurify.sanitize(args.title)}</p>
+        <div class="grid grid-cols-2 gap-4">
+            <div class="drag-items-container space-y-2 p-2">${itemsHtml}</div>
+            <div class="drop-targets-container space-y-2 p-2">${targetsHtml}</div>
+        </div>
+        <button class="check-learning-quiz-btn btn btn-primary mt-4">Kiểm tra</button>
+        <div class="quiz-explanation mt-3 hidden"></div>
+    `;
+    return quizWrapper;
+}
+
+function renderSentenceOrderingQuiz(args) {
+    const quizWrapper = document.createElement('div');
+    quizWrapper.className = 'quiz-wrapper sentence-ordering-quiz';
+    quizWrapper.dataset.type = 'sentence_ordering';
+    quizWrapper.dataset.quizData = JSON.stringify(args);
+
+    const shuffledSentences = [...args.sentences].sort(() => Math.random() - 0.5);
+    const sentencesHtml = shuffledSentences.map(s => `<div class="sentence-item" draggable="true" data-id="${s.id}">${DOMPurify.sanitize(s.text)}</div>`).join('');
+
+    quizWrapper.innerHTML = `
+        <p class="font-semibold mb-3">${DOMPurify.sanitize(args.title)}</p>
+        <div class="sentences-container space-y-2 p-2">${sentencesHtml}</div>
+        <button class="check-learning-quiz-btn btn btn-primary mt-4">Kiểm tra</button>
+        <div class="quiz-explanation mt-3 hidden"></div>
+    `;
+    return quizWrapper;
+}
 
 // --- Modes ---
 function renderPracticeMode(questionsToRender) {
@@ -2046,11 +2123,10 @@ async function startLearningSession() {
     animateTyping('loading-typing-text', loadingMessage, 70);
 
     try {
-        const docId = currentUser ? `${currentUser.uid}_${topic.replace(/\s+/g, '_').toLowerCase()}` : `guest_${topic.replace(/\s+/g, '_').toLowerCase()}`;
+        const docId = `${currentUser.uid}_${topic.replace(/\s+/g, '_').toLowerCase()}`;
         const docRef = doc(db, "userLearningProgress", docId);
         const docSnap = await getDoc(docRef);
-        const existingData = docSnap.exists() ? docSnap.data() : null;
-
+        const existingData = docSnap.data();
 
         completedTopics = existingData?.completedPrompts || [];
         openLessons = existingData?.openLessonPrompts || [];
@@ -2113,7 +2189,7 @@ function renderLearningPath(text) {
             openLessons.forEach(prompt => {
                 const button = learningContent.querySelector(`.learning-link[data-prompt="${prompt}"]`);
                 if (button) {
-                    fetchAndDisplayLesson(prompt, button, false); // Don't scroll into view on initial load
+                    fetchAndDisplayLesson(prompt, button);
                 }
             });
         }, 100);
@@ -2123,26 +2199,21 @@ function renderLearningPath(text) {
     renderMath(learningContent);
 }
 
-async function fetchAndDisplayLesson(prompt, buttonElement, shouldScroll = true) {
+async function fetchAndDisplayLesson(prompt, buttonElement) {
     const lessonContainerId = `lesson-${prompt.replace(/[^a-zA-Z0-9]/g, '')}`;
     let lessonContainer = document.getElementById(lessonContainerId);
 
-    // If lesson exists, just ensure it's visible and scroll to it
     if (lessonContainer) {
         lessonContainer.classList.remove('collapsed');
-        if (shouldScroll) {
-            lessonContainer.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        }
+        lessonContainer.scrollIntoView({ behavior: 'smooth', block: 'start' });
         return;
     }
     
-    // If content is cached, render it directly
     if (learningCache[prompt]) {
-        renderLessonContent(learningCache[prompt], prompt, buttonElement, shouldScroll);
+        renderLessonContent(learningCache[prompt], prompt, buttonElement);
         return;
     }
 
-    // --- Fetch new content ---
     buttonElement.disabled = true;
     const iconSpan = buttonElement.querySelector('.icon');
     if (iconSpan) iconSpan.innerHTML = '<div class="spinner w-5 h-5"></div>';
@@ -2152,60 +2223,34 @@ async function fetchAndDisplayLesson(prompt, buttonElement, shouldScroll = true)
     lessonContainer.className = 'learning-item fade-in';
     lessonContainer.dataset.prompt = prompt;
     lessonContainer.innerHTML = `<div class="text-center p-4"><div class="spinner h-6 w-6 mx-auto mb-3"></div><p class="font-semibold">AI đang tạo nội dung bài học...</p></div>`;
-    
-    // Insert the new lesson container right after the main path container
-    const pathContainer = document.getElementById('lesson-path');
-    pathContainer.insertAdjacentElement('afterend', lessonContainer);
-
-    if (shouldScroll) {
-        lessonContainer.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }
+    learningContent.appendChild(lessonContainer);
+    lessonContainer.scrollIntoView({ behavior: 'smooth', block: 'center' });
 
     try {
-        const fullPrompt = `Bạn là một gia sư AI chuyên nghiệp. Hãy tạo một bài giảng chi tiết và có cấu trúc rõ ràng cho yêu cầu sau.
-        SAU KHI GIẢNG BÀI, hãy tạo một câu hỏi nhỏ (dạng 'multiple_choice' hoặc 'fill_in_the_blank') để kiểm tra kiến thức vừa học.
-        BẮT BUỘC trả lời bằng một khối JSON duy nhất được bọc trong markdown.
-        Cấu trúc JSON phải là:
-        {
-          "lessonContent": "Nội dung bài giảng bằng Markdown...",
-          "quiz": {
-            "type": "...", // "multiple_choice" hoặc "fill_in_the_blank"
-            "question": "...",
-            "options": { "A": "...", "B": "...", "C": "..." }, // Chỉ cho multiple_choice
-            "answer": "A", // Chỉ cho multiple_choice
-            "sentence": "...", // Chỉ cho fill_in_the_blank, dùng {{BLANK}}
-            "blanks": ["..."], // Chỉ cho fill_in_the_blank, là một mảng đáp án
-            "explanation": "..."
-          }
-        }
-        QUY TẮC NỘI DUNG:
+             const fullPrompt = `Bạn là một gia sư AI chuyên nghiệp. Hãy tạo một bài giảng chi tiết và có cấu trúc rõ ràng cho yêu cầu sau.
+        QUY TẮC TRÌNH BÀY (RẤT QUAN TRỌNG):
         1.  **Tiêu đề chính:** Bắt đầu bằng một tiêu đề chính (ví dụ: \`# Giới thiệu về Thì Hiện tại Đơn\`).
-        2.  **Cấu trúc rõ ràng:** Sử dụng các tiêu đề phụ (\`##\`, \`###\`) để chia nhỏ các phần.
-        3.  **Làm nổi bật:** Khi liệt kê, hãy **in đậm** thuật ngữ chính.
-        4.  **Các khối nổi bật (Callout Boxes):**
-            * **Ví dụ:** Đặt TẤT CẢ các câu ví dụ trong khối trích dẫn Markdown và LUÔN BẮT ĐẦU bằng \`> **Ví dụ:** \`.
-            * **Lưu ý/Mẹo:** Đặt trong khối trích dẫn và LUÔN BẮT ĐẦU bằng \`> **Lưu ý:** \` hoặc \`> **Mẹo:** \`.
+        2.  **Cấu trúc rõ ràng:** Sử dụng các tiêu đề phụ (\`##\`, \`###\`) để chia nhỏ các phần như "Định nghĩa", "Cách dùng", "Cấu trúc", "Ví dụ".
+        3.  **Làm nổi bật:** Khi liệt kê các mục, hãy **in đậm** thuật ngữ chính ở đầu mỗi mục (ví dụ: \`- **Chủ ngữ (Subject):** Là...\`).
+        4.  **Các khối nổi bật (Callout Boxes) - RẤT QUAN TRỌNG:**
+            * **Ví dụ:** Đặt TẤT CẢ các câu ví dụ trong khối trích dẫn Markdown và LUÔN BẮT ĐẦU bằng \`> **Ví dụ:** \` (ví dụ: \`> **Ví dụ:** She reads a book.\`).
+            * **Lưu ý/Mẹo quan trọng:** Các lưu ý hoặc mẹo quan trọng nên được đặt trong khối trích dẫn Markdown và LUÔN BẮT ĐẦU bằng \`> **Lưu ý:** \` hoặc \`> **Mẹo:** \` (ví dụ: \`> **Lưu ý:** Đối với ngôi thứ ba số ít...\`).
         5.  **Ngôn ngữ:** Giảng bài hoàn toàn bằng tiếng Việt.
-        6.  **Công thức toán học:** Luôn sử dụng định dạng KaTeX.
+        6.  **Công thức toán học:** Luôn sử dụng định dạng KaTeX cho các công thức (\`$\` cho inline, \`$$\` cho block).
 
         YÊU CẦU CỦA HỌC VIÊN: "${prompt}"`;
         
-        const result = await model.generateContent(prompt);
+        const result = await model.generateContent(fullPrompt);
         const responseText = result.response.text();
-        const parsedData = extractAndParseJson(responseText);
-
-        if (!parsedData || !parsedData.lessonContent) {
-            throw new Error("AI response is not in the expected JSON format.");
-        }
         
-        learningCache[prompt] = parsedData;
+        learningCache[prompt] = responseText;
         await saveOrUpdateLearningProgress({ lessonContents: learningCache });
         
-        renderLessonContent(parsedData, prompt, buttonElement, shouldScroll);
+        renderLessonContent(responseText, prompt, buttonElement);
 
     } catch (error) {
         console.error("Error fetching lesson:", error);
-        lessonContainer.innerHTML = `<p class="text-red-500">Lỗi khi tải bài học. ${error.message}</p>`;
+        lessonContainer.innerHTML = `<p class="text-red-500">Lỗi khi tải bài học.</p>`;
     } finally {
         buttonElement.disabled = false;
         if (!buttonElement.classList.contains('completed')) {
@@ -2215,7 +2260,7 @@ async function fetchAndDisplayLesson(prompt, buttonElement, shouldScroll = true)
     }
 }
 
-function renderLessonContent(data, prompt, buttonElement, shouldScroll) {
+function renderLessonContent(responseText, prompt, buttonElement) {
     const lessonContainerId = `lesson-${prompt.replace(/[^a-zA-Z0-9]/g, '')}`;
     let lessonContainer = document.getElementById(lessonContainerId);
     if (!lessonContainer) {
@@ -2223,11 +2268,10 @@ function renderLessonContent(data, prompt, buttonElement, shouldScroll) {
         lessonContainer.id = lessonContainerId;
         lessonContainer.className = 'learning-item fade-in';
         lessonContainer.dataset.prompt = prompt;
-        const pathContainer = document.getElementById('lesson-path');
-        pathContainer.insertAdjacentElement('afterend', lessonContainer);
+        learningContent.appendChild(lessonContainer);
     }
-    
-    const formattedContent = marked.parse(data.lessonContent || '');
+
+    const formattedContent = marked.parse(responseText);
     
     const tempDiv = document.createElement('div');
     tempDiv.innerHTML = `<div class="prose max-w-none text-gray-700 dark:text-gray-300">${DOMPurify.sanitize(formattedContent, { ADD_TAGS: ["iframe"], ADD_ATTR: ['allow', 'allowfullscreen', 'frameborder', 'scrolling'] })}</div>`;
@@ -2257,20 +2301,6 @@ function renderLessonContent(data, prompt, buttonElement, shouldScroll) {
     lessonBodyEl.className = 'lesson-body';
     lessonBodyEl.appendChild(tempDiv.firstElementChild);
 
-    // Render quiz if it exists
-    if (data.quiz && data.quiz.type) {
-        const quizTitle = document.createElement('h4');
-        quizTitle.className = 'text-lg font-semibold mt-8 mb-4 border-t pt-4';
-        quizTitle.textContent = 'Kiểm tra nhanh';
-        lessonBodyEl.appendChild(quizTitle);
-
-        const renderFunction = learningRenderers[data.quiz.type];
-        if (renderFunction) {
-            const quizElement = renderFunction(data.quiz);
-            lessonBodyEl.appendChild(quizElement);
-        }
-    }
-
     lessonContainer.innerHTML = '';
     lessonContainer.appendChild(lessonTitleEl);
     lessonContainer.appendChild(lessonBodyEl);
@@ -2287,12 +2317,7 @@ function renderLessonContent(data, prompt, buttonElement, shouldScroll) {
     const iconSpan = buttonElement.querySelector('.icon');
     if (iconSpan) iconSpan.innerHTML = '<i data-lucide="check-circle-2" class="w-5 h-5"></i>';
     lucide.createIcons();
-    
-    if (shouldScroll) {
-        lessonContainer.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }
 }
-
 
 // --- EVENT LISTENERS ---
 function updateButtonText() {
@@ -2397,12 +2422,9 @@ alertModal.addEventListener('click', (event) => {
     }
 });
 
-// --- UPDATED: Event listener for Learning Content Area ---
 learningContent.addEventListener('click', (e) => {
     const link = e.target.closest('.learning-link');
     const titleToggle = e.target.closest('.lesson-title-toggle');
-    const quizOption = e.target.closest('.quiz-option-btn');
-    const checkQuizBtn = e.target.closest('.check-learning-quiz-btn');
 
     if (link) {
         e.preventDefault();
@@ -2412,8 +2434,7 @@ learningContent.addEventListener('click', (e) => {
             saveOrUpdateLearningProgress({ openLessonPrompts: openLessons });
         }
         fetchAndDisplayLesson(prompt, link);
-    } 
-    else if (titleToggle) {
+    } else if (titleToggle) {
         e.preventDefault();
         const lessonItem = titleToggle.closest('.learning-item');
         if (lessonItem) {
@@ -2432,58 +2453,7 @@ learningContent.addEventListener('click', (e) => {
             saveOrUpdateLearningProgress({ openLessonPrompts: openLessons });
         }
     }
-    else if (quizOption) {
-        const quizWrapper = quizOption.closest('.quiz-wrapper');
-        if (!quizWrapper || quizWrapper.dataset.answered === 'true') return;
-
-        const allOptions = quizWrapper.querySelectorAll('.quiz-option-btn');
-        allOptions.forEach(btn => {
-            btn.classList.remove('selected'); // Optional: for visual selection
-            btn.disabled = true;
-        });
-        quizOption.classList.add('selected');
-        quizWrapper.dataset.answered = 'true';
-
-        const correctAnswer = quizWrapper.dataset.correct;
-        const userAnswer = quizOption.dataset.option;
-        const explanationDiv = quizWrapper.querySelector('.quiz-explanation');
-
-        if (userAnswer === correctAnswer) {
-            quizOption.classList.add('correct');
-            explanationDiv.classList.add('correct');
-        } else {
-            quizOption.classList.add('incorrect');
-            const correctBtn = quizWrapper.querySelector(`.quiz-option-btn[data-option="${correctAnswer}"]`);
-            if (correctBtn) correctBtn.classList.add('correct');
-            explanationDiv.classList.add('incorrect');
-        }
-        explanationDiv.classList.remove('hidden');
-    }
-    else if (checkQuizBtn) {
-        const quizWrapper = checkQuizBtn.closest('.quiz-wrapper');
-        if (!quizWrapper || quizWrapper.dataset.answered === 'true') return;
-        
-        quizWrapper.dataset.answered = 'true';
-        checkQuizBtn.disabled = true;
-
-        const explanationDiv = quizWrapper.querySelector('.quiz-explanation');
-        const inputs = quizWrapper.querySelectorAll('.quiz-blank-input');
-        const correctAnswers = JSON.parse(quizWrapper.dataset.blanks);
-        let allCorrect = true;
-
-        inputs.forEach((input, index) => {
-            input.disabled = true;
-            const isInputCorrect = input.value.trim().toLowerCase() === correctAnswers[index].toLowerCase();
-            if (!isInputCorrect) allCorrect = false;
-            input.classList.add(isInputCorrect ? 'correct' : 'incorrect');
-        });
-
-        explanationDiv.innerHTML = `<strong>Giải thích:</strong> ${quizWrapper.dataset.explanation}`;
-        explanationDiv.classList.add(allCorrect ? 'correct' : 'incorrect');
-        explanationDiv.classList.remove('hidden');
-    }
 });
-
 
 dynamicControlsContainer.addEventListener('click', (e) => {
     if (e.target.classList.contains('btn-recent-topic')) {
